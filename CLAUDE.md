@@ -2331,8 +2331,13 @@ NoEntryZoneManagerが962行の巨大クラスとなり、複数の責務（静�
    - 原因: CollisionValidator.ValidateSizeメソッドに通常ウィンドウとの衝突判定が実装されていなかった
    - 修正: ValidateSizeにCheckNormalWindowsオプション使用時の通常ウィンドウ衝突判定を追加（67行追加）
    - 効果: 不可侵ウィンドウが通常ウィンドウに接触した方向のみリサイズを制限し、他の不可侵ウィンドウと同様の動作を実現
+4. リサイズ時のY方向衝突判定で横幅が縮小した際に貫通する問題を解決（2025年1月27日）
+   - 問題: 横幅を最小にした状態で縦方向にリサイズすると、衝突判定を貫通して縦に伸びる
+   - 原因: Y方向の衝突判定で使う幅が `minWidth ?? proposedSize.Width` となっており、X方向に縮小している場合に `proposedSize.Width < currentBounds.Width` となり、衝突判定の矩形が実際のウィンドウより小さくなっていた
+   - 修正: Y方向のチェックで使う幅を `isGrowingWidth ? (minWidth ?? proposedSize.Width) : currentBounds.Width` に変更（3箇所）
+   - 効果: X方向に拡大している場合は調整後の幅、拡大していない場合は現在の幅を使用することで、常に正確な衝突判定を実現
 
-**コミット数**: 4件
+**コミット数**: 5件
 1. 段階1: サービス層分離
 2. 段階2: CollisionService統合
 3. バグ修正2件（通常ウィンドウ衝突関連）
