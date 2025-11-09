@@ -2326,11 +2326,17 @@ NoEntryZoneManagerが962行の巨大クラスとなり、複数の責務（静�
 2. 不可侵ウィンドウが通常ウィンドウに高速移動時に空中停止する問題を解決
    - CollisionValidator.ValidatePositionにX/Y軸独立検証を実装
    - 通常ウィンドウに対しても境界まで正確に移動可能に
+3. 不可侵付きリサイズウィンドウが通常ウィンドウに触れると固まる問題を解決（2025年1月27日）
+   - 問題: ResizableNoEntryWindowStrategyで通常ウィンドウにリサイズ時に接触すると固まる
+   - 原因: CollisionValidator.ValidateSizeメソッドに通常ウィンドウとの衝突判定が実装されていなかった
+   - 修正: ValidateSizeにCheckNormalWindowsオプション使用時の通常ウィンドウ衝突判定を追加（67行追加）
+   - 効果: 不可侵ウィンドウが通常ウィンドウに接触した方向のみリサイズを制限し、他の不可侵ウィンドウと同様の動作を実現
 
-**コミット数**: 3件
+**コミット数**: 4件
 1. 段階1: サービス層分離
 2. 段階2: CollisionService統合
 3. バグ修正2件（通常ウィンドウ衝突関連）
+4. バグ修正（ResizableNoEntryWindow固まる問題）
 
 **実装期間**: 約3時間
 
