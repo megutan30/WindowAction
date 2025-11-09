@@ -248,8 +248,8 @@ namespace MultiWindowActionGame.Windows
                 // 子の不可侵境界との接触をチェックしてサイズを調整
                 newSize = CheckChildBoundaryContact(window, originalSize, newSize);
 
-                // 親がある場合、親の境界内に収まるようにサイズを制約（3pxバッファ）
-                if (window.Parent is GameWindow resizeParentWindow)
+                // 親がある場合かつ自分自身が不可侵ウィンドウの場合、親の境界内に収まるようにサイズを制約（3pxバッファ）
+                if (window.Parent is GameWindow resizeParentWindow && window.IsNoEntryWindow)
                 {
                     const int PARENT_BOUNDARY_BUFFER = 5; // 親境界とのバッファ（px）
                     Rectangle parentBounds = resizeParentWindow.CollisionBounds;
@@ -771,8 +771,8 @@ namespace MultiWindowActionGame.Windows
                 validBounds = ZoneManager.GetValidPosition(window.CollisionBounds, proposedBounds, window);
             }
 
-            // 親がある場合、validBoundsを親の境界内に再制約（3pxバッファ）
-            if (window.Parent is GameWindow finalParentWindow)
+            // 親がある場合かつ自分自身が不可侵ウィンドウの場合、validBoundsを親の境界内に再制約（3pxバッファ）
+            if (window.Parent is GameWindow finalParentWindow && window.IsNoEntryWindow)
             {
                 const int PARENT_BOUNDARY_BUFFER = 5; // 親境界とのバッファ（px）
                 Rectangle finalParentBounds = finalParentWindow.CollisionBounds;

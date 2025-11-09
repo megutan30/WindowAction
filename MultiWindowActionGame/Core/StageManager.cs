@@ -82,10 +82,9 @@ namespace MultiWindowActionGame.Core
                 (WindowType.NormalBlackNoEntry, new Point(125, 750), new Size(625, 250),null),
                 (WindowType.Movable, new Point(688, 763), new Size(200, 150),null),
                 (WindowType.NormalBlack, new Point(1250, 750), new Size(625, 250),null),
-                (WindowType.Resizable, new Point(100, 200), new Size(1500, 550),null),
+                (WindowType.ResizableNoEntry, new Point(100, 200), new Size(1500, 550),null),
                 (WindowType.TextDisplay, new Point(625, 63), new Size(375, 125), "Stage 2"),
-                // 不可侵ウィンドウバリエーション
-                (WindowType.ResizableNoEntry, new Point(500, 400), new Size(180, 120),null),
+                (WindowType.MovableNoEntry, new Point(500, 400), new Size(180, 120),null),
                 //(WindowType.Minimizable, new Point(300, 250), new Size(450, 300),null),
             },
                 GoalPosition = new Point(1625, 875),
