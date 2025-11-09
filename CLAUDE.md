@@ -2336,6 +2336,12 @@ NoEntryZoneManagerが962行の巨大クラスとなり、複数の責務（静�
    - 原因: Y方向の衝突判定で使う幅が `minWidth ?? proposedSize.Width` となっており、X方向に縮小している場合に `proposedSize.Width < currentBounds.Width` となり、衝突判定の矩形が実際のウィンドウより小さくなっていた
    - 修正: Y方向のチェックで使う幅を `isGrowingWidth ? (minWidth ?? proposedSize.Width) : currentBounds.Width` に変更（3箇所）
    - 効果: X方向に拡大している場合は調整後の幅、拡大していない場合は現在の幅を使用することで、常に正確な衝突判定を実現
+5. 親が不可侵ウィンドウで子が通常ウィンドウの場合に動けなくなる問題を解決（2025年1月27日）
+   - 問題: 親ウィンドウが不可侵で子ウィンドウが通常の場合、親ウィンドウが全く移動できなくなる
+   - 原因: CollisionValidator.ValidatePositionメソッドにExcludeChildrenオプションの処理が実装されていなかった。ValidateSizeには実装されていたが、ValidatePositionでは子ウィンドウが障害物として扱われていた
+   - 修正: ValidatePositionメソッド（line 234-236）にExcludeChildren処理を追加
+   - コード: `if (options.ExcludeChildren && options.ExcludeWindow != null && options.ExcludeWindow.GetAllDescendants().Contains(window)) continue;`
+   - 効果: 親ウィンドウが移動する際、その子ウィンドウを障害物として扱わなくなり、正常に移動可能になる
 
 **コミット数**: 5件
 1. 段階1: サービス層分離
