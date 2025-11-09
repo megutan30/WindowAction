@@ -523,6 +523,74 @@ namespace MultiWindowActionGame.Services
                 }
             }
 
+            // 通常ウィンドウとの衝突判定（不可侵ウィンドウがリサイズする場合）
+            if (options.CheckNormalWindows)
+            {
+                var allWindows = windowManager.GetAllWindows();
+
+                foreach (var window in allWindows)
+                {
+                    // 除外ウィンドウとその子孫をスキップ
+                    if (window == options.ExcludeWindow) continue;
+                    if (options.ExcludeChildren && options.ExcludeWindow != null &&
+                        options.ExcludeWindow.GetAllDescendants().Contains(window)) continue;
+
+                    // 不可侵ウィンドウはスキップ（境界判定で処理済み）
+                    if (window.IsNoEntryWindow) continue;
+
+                    // 最小化されているウィンドウはスキップ
+                    if (window.WindowState == FormWindowState.Minimized || window.IsMinimized) continue;
+
+                    // X方向の拡大をチェック
+                    if (isGrowingWidth)
+                    {
+                        Rectangle xResize = new Rectangle(
+                            currentBounds.X,
+                            currentBounds.Y,
+                            proposedSize.Width,
+                            currentBounds.Height
+                        );
+
+                        if (xResize.IntersectsWith(window.CollisionBounds))
+                        {
+                            // 左から右に拡大している場合
+                            if (currentBounds.X < window.CollisionBounds.X)
+                            {
+                                int candidateWidth = window.CollisionBounds.X - currentBounds.X;
+                                if (!minWidth.HasValue || candidateWidth < minWidth.Value)
+                                {
+                                    minWidth = candidateWidth;
+                                }
+                            }
+                        }
+                    }
+
+                    // Y方向の拡大をチェック
+                    if (isGrowingHeight)
+                    {
+                        Rectangle yResize = new Rectangle(
+                            currentBounds.X,
+                            currentBounds.Y,
+                            minWidth ?? proposedSize.Width,  // X軸で調整された幅を使用
+                            proposedSize.Height
+                        );
+
+                        if (yResize.IntersectsWith(window.CollisionBounds))
+                        {
+                            // 上から下に拡大している場合
+                            if (currentBounds.Y < window.CollisionBounds.Y)
+                            {
+                                int candidateHeight = window.CollisionBounds.Y - currentBounds.Y;
+                                if (!minHeight.HasValue || candidateHeight < minHeight.Value)
+                                {
+                                    minHeight = candidateHeight;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // 最終的なサイズを適用
             if (minWidth.HasValue && isGrowingWidth)
             {
