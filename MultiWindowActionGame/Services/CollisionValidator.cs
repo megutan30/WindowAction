@@ -439,10 +439,13 @@ namespace MultiWindowActionGame.Services
                     // Y方向の拡大をチェック
                     if (isGrowingHeight)
                     {
+                        // X方向で調整された幅、またはX方向に拡大していない場合は現在の幅を使用
+                        int widthForYCheck = isGrowingWidth ? (minWidth ?? proposedSize.Width) : currentBounds.Width;
+
                         Rectangle yResize = new Rectangle(
                             currentBounds.X,
                             currentBounds.Y,
-                            minWidth ?? proposedSize.Width,
+                            widthForYCheck,
                             proposedSize.Height
                         );
 
@@ -496,10 +499,13 @@ namespace MultiWindowActionGame.Services
                 // Y方向の拡大をチェック
                 if (isGrowingHeight)
                 {
+                    // X方向で調整された幅、またはX方向に拡大していない場合は現在の幅を使用
+                    int widthForYCheck = isGrowingWidth ? (minWidth ?? proposedSize.Width) : currentBounds.Width;
+
                     Rectangle yResize = new Rectangle(
                         currentBounds.X,
                         currentBounds.Y,
-                        minWidth ?? proposedSize.Width,
+                        widthForYCheck,
                         proposedSize.Height
                     );
 
@@ -568,10 +574,13 @@ namespace MultiWindowActionGame.Services
                     // Y方向の拡大をチェック
                     if (isGrowingHeight)
                     {
+                        // X方向で調整された幅、またはX方向に拡大していない場合は現在の幅を使用
+                        int widthForYCheck = isGrowingWidth ? (minWidth ?? proposedSize.Width) : currentBounds.Width;
+
                         Rectangle yResize = new Rectangle(
                             currentBounds.X,
                             currentBounds.Y,
-                            minWidth ?? proposedSize.Width,  // X軸で調整された幅を使用
+                            widthForYCheck,
                             proposedSize.Height
                         );
 
