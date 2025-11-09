@@ -47,8 +47,9 @@ namespace MultiWindowActionGame.Services
         /// <param name="bounds">チェックする矩形</param>
         /// <param name="excludeWindow">除外するウィンドウ（自分自身を除外する場合に使用）</param>
         /// <param name="useZOrder">Z-orderを考慮した可視性フィルタリングを行うか</param>
+        /// <param name="excludeChildren">excludeWindowの子孫ウィンドウも除外するか</param>
         /// <returns>衝突がある場合true</returns>
-        public bool CheckNormalWindowCollision(Rectangle bounds, GameWindow? excludeWindow, bool useZOrder)
+        public bool CheckNormalWindowCollision(Rectangle bounds, GameWindow? excludeWindow, bool useZOrder, bool excludeChildren = false)
         {
             var allWindows = windowManager.GetAllWindows();
 
@@ -56,6 +57,10 @@ namespace MultiWindowActionGame.Services
             {
                 // 除外ウィンドウはスキップ
                 if (window == excludeWindow) continue;
+
+                // ExcludeChildrenが有効な場合、除外ウィンドウの子孫もスキップ
+                if (excludeChildren && excludeWindow != null &&
+                    excludeWindow.GetAllDescendants().Contains(window)) continue;
 
                 // 親ウィンドウもスキップ（子が親の内部で移動する場合、親自体は障害物にならない）
                 if (excludeWindow != null && window == excludeWindow.Parent) continue;

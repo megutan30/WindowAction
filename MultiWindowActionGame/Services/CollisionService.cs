@@ -56,7 +56,7 @@ namespace MultiWindowActionGame.Services
             // 3. 通常ウィンドウ判定（不可侵が移動する場合）
             if (options.CheckNormalWindows && options.ExcludeWindow?.IsNoEntryWindow == true)
             {
-                if (zOrderHelper.CheckNormalWindowCollision(bounds, options.ExcludeWindow, options.UseZOrderFiltering))
+                if (zOrderHelper.CheckNormalWindowCollision(bounds, options.ExcludeWindow, options.UseZOrderFiltering, options.ExcludeChildren))
                 {
                     return true;
                 }
