@@ -231,6 +231,10 @@ namespace MultiWindowActionGame.Services
                     // 除外ウィンドウはスキップ
                     if (window == options.ExcludeWindow) continue;
 
+                    // ExcludeChildrenが有効な場合、除外ウィンドウの子孫もスキップ
+                    if (options.ExcludeChildren && options.ExcludeWindow != null &&
+                        options.ExcludeWindow.GetAllDescendants().Contains(window)) continue;
+
                     // 親ウィンドウもスキップ（子が親の内部で移動する場合、親自体は障害物にならない）
                     if (options.ExcludeWindow != null && window == options.ExcludeWindow.Parent) continue;
 

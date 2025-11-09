@@ -2336,6 +2336,28 @@ NoEntryZoneManagerが962行の巨大クラスとなり、複数の責務（静�
    - 原因: Y方向の衝突判定で使う幅が `minWidth ?? proposedSize.Width` となっており、X方向に縮小している場合に `proposedSize.Width < currentBounds.Width` となり、衝突判定の矩形が実際のウィンドウより小さくなっていた
    - 修正: Y方向のチェックで使う幅を `isGrowingWidth ? (minWidth ?? proposedSize.Width) : currentBounds.Width` に変更（3箇所）
    - 効果: X方向に拡大している場合は調整後の幅、拡大していない場合は現在の幅を使用することで、常に正確な衝突判定を実現
+5. 親が不可侵ウィンドウで子が通常ウィンドウの場合に動けなくなる問題を解決（2025年1月27日）
+   - 問題: 親ウィンドウが不可侵で子ウィンドウが通常の場合、親ウィンドウが全く移動できなくなる
+   - 原因: 複数箇所でExcludeChildrenオプションの処理が欠落
+     1. CollisionValidator.ValidatePositionメソッド（通常ウィンドウ判定部分）
+     2. ZOrderCollisionHelper.CheckNormalWindowCollisionメソッド（excludeChildrenパラメータ自体が存在しない）
+     3. CollisionService.CheckCollisionメソッド（options.ExcludeChildrenを渡していない）
+   - 修正:
+     1. CollisionValidator.ValidatePosition（line 234-236）にExcludeChildren処理を追加
+     2. ZOrderCollisionHelper.CheckNormalWindowCollision（line 50-63）にexcludeChildrenパラメータと処理を追加
+     3. CollisionService.CheckCollision（line 59）でoptions.ExcludeChildrenを渡すように修正
+   - 効果: 親ウィンドウが移動する際、その子ウィンドウを障害物として扱わなくなり、正常に移動可能になる
+6. 親のリサイズウィンドウが子の境界を貫通する問題を解決（2025年1月27日）
+   - 問題1: 親の不可侵リサイズウィンドウを拡大した際、子（不可侵ウィンドウ）の境界線を無視してそのまま拡大できてしまう
+   - 問題2: 親の不可侵リサイズウィンドウを縮小した際、子（通常ウィンドウ）を貫通してしまう
+   - 原因:
+     1. CheckChildBoundaryContactメソッドが縮小時のみ子の境界をチェックし、拡大時はチェックしていなかった
+     2. 不可侵ウィンドウの子のみをチェックし、通常ウィンドウの子をスキップしていた（line 599-603）
+   - 修正: CheckChildBoundaryContactメソッド（WindowStrategies.cs）
+     1. 拡大時のチェックを追加（line 628-649, 675-697）
+     2. 通常ウィンドウの子もチェック対象に追加（line 596-603）
+     3. 不可侵ウィンドウは境界（±3px）を考慮、通常ウィンドウは境界なし（0px）で判定
+   - 効果: 親がリサイズする際、不可侵ウィンドウと通常ウィンドウの両方の子で正しく止まるようになり、貫通しなくなる
 
 **コミット数**: 5件
 1. 段階1: サービス層分離

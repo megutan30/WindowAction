@@ -593,26 +593,23 @@ namespace MultiWindowActionGame.Windows
             // デバッグ用ログ
             System.Diagnostics.Debug.WriteLine($"[CheckChildBoundaryContact] Current: {currentBounds}, Proposed: {proposedSize}, Shrinking W:{isShrinkingWidth} H:{isShrinkingHeight}");
 
-            // 全子孫ウィンドウをチェック
+            // 全子孫ウィンドウをチェック（不可侵ウィンドウと通常ウィンドウの両方）
             foreach (var child in window.GetAllDescendants().OfType<GameWindow>())
             {
-                // 不可侵ウィンドウのみ処理
-                if (!child.IsNoEntryWindow)
-                {
-                    continue;
-                }
-
                 Rectangle childBounds = child.CollisionBounds;
-                System.Diagnostics.Debug.WriteLine($"  Child NoEntry: {childBounds}");
+                // 不可侵ウィンドウの場合は境界を考慮、通常ウィンドウの場合は境界なし
+                int boundaryWidth = child.IsNoEntryWindow ? BOUNDARY_WIDTH : 0;
+
+                System.Diagnostics.Debug.WriteLine($"  Child {(child.IsNoEntryWindow ? "NoEntry" : "Normal")}: {childBounds}, Boundary: {boundaryWidth}px");
 
                 // 幅方向のチェック
                 if (isShrinkingWidth)
                 {
-                    // 縮小時: 親の右辺が子の右辺境界（右から5px内側）に達する場合
+                    // 縮小時: 親の右辺が子の右辺境界に達する場合
                     int proposedRight = currentBounds.X + constrainedSize.Width;
-                    int childRightBoundary = childBounds.Right + BOUNDARY_WIDTH;
+                    int childRightBoundary = childBounds.Right + boundaryWidth;
 
-                    System.Diagnostics.Debug.WriteLine($"    Width: proposedRight={proposedRight}, childRightBoundary={childRightBoundary}, currentRight={currentBounds.Right}");
+                    System.Diagnostics.Debug.WriteLine($"    Width(Shrink): proposedRight={proposedRight}, childRightBoundary={childRightBoundary}, currentRight={currentBounds.Right}");
 
                     if (proposedRight <= childRightBoundary && currentBounds.Right > childRightBoundary)
                     {
@@ -628,15 +625,15 @@ namespace MultiWindowActionGame.Windows
                         }
                     }
                 }
-
+              
                 // 高さ方向のチェック
                 if (isShrinkingHeight)
                 {
-                    // 縮小時: 親の下辺が子の下辺境界（下から5px内側）に達する場合
+                    // 縮小時: 親の下辺が子の下辺境界に達する場合
                     int proposedBottom = currentBounds.Y + constrainedSize.Height;
-                    int childBottomBoundary = childBounds.Bottom + BOUNDARY_WIDTH;
+                    int childBottomBoundary = childBounds.Bottom + boundaryWidth;
 
-                    System.Diagnostics.Debug.WriteLine($"    Height: proposedBottom={proposedBottom}, childBottomBoundary={childBottomBoundary}, currentBottom={currentBounds.Bottom}");
+                    System.Diagnostics.Debug.WriteLine($"    Height(Shrink): proposedBottom={proposedBottom}, childBottomBoundary={childBottomBoundary}, currentBottom={currentBounds.Bottom}");
 
                     if (proposedBottom <= childBottomBoundary && currentBounds.Bottom > childBottomBoundary)
                     {
