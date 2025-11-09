@@ -625,29 +625,7 @@ namespace MultiWindowActionGame.Windows
                         }
                     }
                 }
-                else // 拡大時
-                {
-                    // 拡大時: 親の右辺が子の左辺境界に達する場合
-                    int proposedRight = currentBounds.X + constrainedSize.Width;
-                    int childLeftBoundary = childBounds.Left - boundaryWidth;
-
-                    System.Diagnostics.Debug.WriteLine($"    Width(Grow): proposedRight={proposedRight}, childLeftBoundary={childLeftBoundary}, currentRight={currentBounds.Right}");
-
-                    if (proposedRight >= childLeftBoundary && currentBounds.Right < childLeftBoundary)
-                    {
-                        // Y座標の重なりもチェック
-                        if (currentBounds.Bottom > childBounds.Top && currentBounds.Top < childBounds.Bottom)
-                        {
-                            int maxWidth = childLeftBoundary - currentBounds.X - 1; // 1px余裕
-                            if (maxWidth > 0 && maxWidth < constrainedSize.Width)
-                            {
-                                System.Diagnostics.Debug.WriteLine($"    *** Width CONSTRAINED (Grow): {constrainedSize.Width} -> {maxWidth}");
-                                constrainedSize.Width = maxWidth;
-                            }
-                        }
-                    }
-                }
-
+              
                 // 高さ方向のチェック
                 if (isShrinkingHeight)
                 {
@@ -668,29 +646,6 @@ namespace MultiWindowActionGame.Windows
                             {
                                 System.Diagnostics.Debug.WriteLine($"    *** Height CONSTRAINED: {constrainedSize.Height} -> {minHeight}");
                                 constrainedSize.Height = minHeight;
-                            }
-                        }
-                    }
-                }
-                else // 拡大時
-                {
-                    // 拡大時: 親の下辺が子の上辺境界に達する場合
-                    int proposedBottom = currentBounds.Y + constrainedSize.Height;
-                    int childTopBoundary = childBounds.Top - boundaryWidth;
-
-                    System.Diagnostics.Debug.WriteLine($"    Height(Grow): proposedBottom={proposedBottom}, childTopBoundary={childTopBoundary}, currentBottom={currentBounds.Bottom}");
-
-                    if (proposedBottom >= childTopBoundary && currentBounds.Bottom < childTopBoundary)
-                    {
-                        // X座標の重なりもチェック（調整後の幅を使用）
-                        int proposedRight = currentBounds.X + constrainedSize.Width;
-                        if (proposedRight > childBounds.Left && currentBounds.Left < childBounds.Right)
-                        {
-                            int maxHeight = childTopBoundary - currentBounds.Y - 1; // 1px余裕
-                            if (maxHeight > 0 && maxHeight < constrainedSize.Height)
-                            {
-                                System.Diagnostics.Debug.WriteLine($"    *** Height CONSTRAINED (Grow): {constrainedSize.Height} -> {maxHeight}");
-                                constrainedSize.Height = maxHeight;
                             }
                         }
                     }
