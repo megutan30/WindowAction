@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build:*)",
+      "Bash(find:*)",
+      "Bash(mkdir:*)",
+      "Bash(mv:*)",
+      "Bash(move:*)",
+      "Bash(git check-ignore:*)",
+      "Bash(git add:*)",
+      "Bash(rm:*)",
+      "Bash(grep:*)",
+      "Bash(dotnet run:*)",
+      "Bash(taskkill:*)",
+      "Bash(timeout:*)",
+      "Bash(git commit:*)",
+      "Bash(dir:*)",
+      "Bash(test:*)",
+      "WebSearch",
+      "Read(//d/**)",
+      "Bash(git checkout:*)",
+      "Bash(git rm:*)",
+      "Bash(dotnet clean:*)",
+      "Bash(findstr:*)"
+    ],
+    "deny": []
+  }
+}

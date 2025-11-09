@@ -1,0 +1,22 @@
+﻿{
+  "Player": {
+    "MovementSpeed": 400.0,
+    "Gravity": 2600.0,
+    "JumpForce": 1100.0,
+    "DefaultSize": {
+      "Width": 60,
+      "Height": 60
+    },
+    "GroundCheckHeight": 15
+  },
+  "Window": {
+    "MinimumSize": {
+      "Width": 100,
+      "Height": 100
+    }
+  },
+  "Gameplay": {
+    "TargetFPS": 60,
+    "WindowSnapDistance": 20.0
+  }
+}
