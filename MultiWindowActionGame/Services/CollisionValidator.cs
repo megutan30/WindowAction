@@ -228,21 +228,12 @@ namespace MultiWindowActionGame.Services
 
                 foreach (var window in allWindows)
                 {
-                    // 除外ウィンドウはスキップ
-                    if (window == options.ExcludeWindow) continue;
-
-                    // ExcludeChildrenが有効な場合、除外ウィンドウの子孫もスキップ
-                    if (options.ExcludeChildren && options.ExcludeWindow != null &&
-                        options.ExcludeWindow.GetAllDescendants().Contains(window)) continue;
-
-                    // 親ウィンドウもスキップ（子が親の内部で移動する場合、親自体は障害物にならない）
-                    if (options.ExcludeWindow != null && window == options.ExcludeWindow.Parent) continue;
+                    // 統一的なフィルタリング処理を使用
+                    if (CollisionFilter.ShouldSkipWindow(window, options.ExcludeWindow, options.ExcludeChildren))
+                        continue;
 
                     // 不可侵ウィンドウはスキップ（境界判定で処理済み）
                     if (window.IsNoEntryWindow) continue;
-
-                    // 最小化されているウィンドウはスキップ
-                    if (window.WindowState == FormWindowState.Minimized || window.IsMinimized) continue;
 
                     Rectangle windowBounds = window.CollisionBounds;
 
@@ -540,16 +531,12 @@ namespace MultiWindowActionGame.Services
 
                 foreach (var window in allWindows)
                 {
-                    // 除外ウィンドウとその子孫をスキップ
-                    if (window == options.ExcludeWindow) continue;
-                    if (options.ExcludeChildren && options.ExcludeWindow != null &&
-                        options.ExcludeWindow.GetAllDescendants().Contains(window)) continue;
+                    // 統一的なフィルタリング処理を使用（親ウィンドウは除外しない）
+                    if (CollisionFilter.ShouldSkipWindow(window, options.ExcludeWindow, options.ExcludeChildren, excludeParent: false))
+                        continue;
 
                     // 不可侵ウィンドウはスキップ（境界判定で処理済み）
                     if (window.IsNoEntryWindow) continue;
-
-                    // 最小化されているウィンドウはスキップ
-                    if (window.WindowState == FormWindowState.Minimized || window.IsMinimized) continue;
 
                     // X方向の拡大をチェック
                     if (isGrowingWidth)
