@@ -246,8 +246,6 @@ namespace MultiWindowActionGame.Windows
                 // スケールを再計算（調整されたサイズに基づく）
                 scale = new SizeF((float)newSize.Width / originalSize.Width, (float)newSize.Height / originalSize.Height);
 
-                // リファクタリング修正: movableRegionは毎回計算されるため、更新不要
-
                 // サイズ更新とスケール適用をバッチ処理
                 window.UpdateTargetSize(newSize);
                 ApplyScaleToHierarchy(window, scale);
@@ -536,6 +534,7 @@ namespace MultiWindowActionGame.Windows
             // リサイズ方向を判定
             bool isShrinkingWidth = proposedSize.Width < window.Size.Width;
             bool isShrinkingHeight = proposedSize.Height < window.Size.Height;
+            int bufferSize = 5;
 
             Size constrainedSize = proposedSize;
             Rectangle currentBounds = window.CollisionBounds;
@@ -574,7 +573,7 @@ namespace MultiWindowActionGame.Windows
                         // Y座標の重なりもチェック
                         if (currentBounds.Bottom > childBounds.Top && currentBounds.Top < childBounds.Bottom)
                         {
-                            int minWidth = childRightBoundary - currentBounds.X + 1; // 1px余裕
+                            int minWidth = childRightBoundary - currentBounds.X + bufferSize;
                             if (minWidth > 0 && minWidth > constrainedSize.Width)
                             {
                                 System.Diagnostics.Debug.WriteLine($"    *** Width CONSTRAINED: {constrainedSize.Width} -> {minWidth}");
@@ -599,7 +598,7 @@ namespace MultiWindowActionGame.Windows
                         int proposedRight = currentBounds.X + constrainedSize.Width;
                         if (proposedRight > childBounds.Left && currentBounds.Left < childBounds.Right)
                         {
-                            int minHeight = childBottomBoundary - currentBounds.Y + 1; // 1px余裕
+                            int minHeight = childBottomBoundary - currentBounds.Y + 5;
                             if (minHeight > 0 && minHeight > constrainedSize.Height)
                             {
                                 System.Diagnostics.Debug.WriteLine($"    *** Height CONSTRAINED: {constrainedSize.Height} -> {minHeight}");
