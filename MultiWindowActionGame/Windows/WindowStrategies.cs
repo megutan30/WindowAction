@@ -4,6 +4,7 @@ using MultiWindowActionGame.Effects;
 using MultiWindowActionGame.Core;
 using MultiWindowActionGame.Interfaces;
 using MultiWindowActionGame.Collision;
+using MultiWindowActionGame.Services;
 using System;
 using System.Drawing;
 using System.Numerics;
@@ -225,16 +226,7 @@ namespace MultiWindowActionGame.Windows
             bool hasCollision;
             if (collisionService != null)
             {
-                var options = new CollisionOptions
-                {
-                    ExcludeWindow = window,
-                    ExcludeChildren = true,  // 親ウィンドウが子を持つ場合、子も除外
-                    CheckNoEntryZones = true,
-                    CheckNoEntryBoundaries = true,
-                    CheckNormalWindows = window.IsNoEntryWindow,  // 不可侵ウィンドウは通常のウィンドウともぶつかる
-                    CheckButtons = window.IsNoEntryWindow,  // 不可侵ウィンドウはボタンともぶつかる
-                    UseZOrderFiltering = true
-                };
+                var options = CollisionFilter.CreateStandardOptions(window);
                 hasCollision = collisionService.CheckCollision(proposedBounds, options);
             }
             else
@@ -248,27 +240,8 @@ namespace MultiWindowActionGame.Windows
                 // 子の不可侵境界との接触をチェックしてサイズを調整
                 newSize = CheckChildBoundaryContact(window, originalSize, newSize);
 
-                // 親がある場合かつ自分自身が不可侵ウィンドウの場合、親の境界内に収まるようにサイズを制約（3pxバッファ）
-                if (window.Parent is GameWindow resizeParentWindow && window.IsNoEntryWindow)
-                {
-                    const int PARENT_BOUNDARY_BUFFER = 5; // 親境界とのバッファ（px）
-                    Rectangle parentBounds = resizeParentWindow.CollisionBounds;
-                    Rectangle currentBounds = window.CollisionBounds;
-
-                    // 親の境界を超えないように幅を制限（3pxバッファ）
-                    int maxWidth = parentBounds.Right - currentBounds.X - PARENT_BOUNDARY_BUFFER;
-                    if (newSize.Width > maxWidth)
-                    {
-                        newSize.Width = Math.Max(settings.MinimumSize.Width, maxWidth);
-                    }
-
-                    // 親の境界を超えないように高さを制限（3pxバッファ）
-                    int maxHeight = parentBounds.Bottom - currentBounds.Y - PARENT_BOUNDARY_BUFFER;
-                    if (newSize.Height > maxHeight)
-                    {
-                        newSize.Height = Math.Max(settings.MinimumSize.Height, maxHeight);
-                    }
-                }
+                // 親がある場合かつ自分自身が不可侵ウィンドウの場合、親の境界内に収まるようにサイズを制約（5pxバッファ）
+                newSize = CollisionFilter.ApplyParentBoundaryBufferForResize(window, newSize);
 
                 // スケールを再計算（調整されたサイズに基づく）
                 scale = new SizeF((float)newSize.Width / originalSize.Width, (float)newSize.Height / originalSize.Height);
@@ -426,35 +399,13 @@ namespace MultiWindowActionGame.Windows
             );
 
             // 親が不可侵ウィンドウの場合、親の境界内に制限
-            if (window.Parent is GameWindow parentWindow && parentWindow.IsNoEntryWindow)
-            {
-                Rectangle parentBounds = parentWindow.CollisionBounds;
-                Rectangle windowBounds = window.CollisionBounds;
-
-                // 親の境界を超えないように最大サイズを制限
-                int maxWidth = parentBounds.Right - windowBounds.Left;
-                int maxHeight = parentBounds.Bottom - windowBounds.Top;
-
-                proposedSize = new Size(
-                    Math.Min(proposedSize.Width, maxWidth),
-                    Math.Min(proposedSize.Height, maxHeight)
-                );
-            }
+            proposedSize = CollisionFilter.ConstrainSizeToParentBounds(window, proposedSize);
 
             // 境界チェックの強化（不可侵領域との衝突チェック）
             Size validSize;
             if (collisionService != null)
             {
-                var options = new CollisionOptions
-                {
-                    ExcludeWindow = window,
-                    ExcludeChildren = true,  // 親ウィンドウが子を持つ場合、子も除外
-                    CheckNoEntryZones = true,
-                    CheckNoEntryBoundaries = true,
-                    CheckNormalWindows = window.IsNoEntryWindow,  // 不可侵ウィンドウは通常のウィンドウともぶつかる
-                    CheckButtons = window.IsNoEntryWindow,  // 不可侵ウィンドウはボタンともぶつかる
-                    UseZOrderFiltering = true
-                };
+                var options = CollisionFilter.CreateStandardOptions(window);
                 validSize = collisionService.ValidateSize(window.CollisionBounds, proposedSize, options);
             }
             else
@@ -588,7 +539,6 @@ namespace MultiWindowActionGame.Windows
 
             Size constrainedSize = proposedSize;
             Rectangle currentBounds = window.CollisionBounds;
-            const int BOUNDARY_WIDTH = 3; // 不可侵境界の幅
 
             // デバッグ用ログ
             System.Diagnostics.Debug.WriteLine($"[CheckChildBoundaryContact] Current: {currentBounds}, Proposed: {proposedSize}, Shrinking W:{isShrinkingWidth} H:{isShrinkingHeight}");
@@ -598,7 +548,7 @@ namespace MultiWindowActionGame.Windows
             {
                 Rectangle childBounds = child.CollisionBounds;
                 // 不可侵ウィンドウの場合は境界を考慮、通常ウィンドウの場合は境界なし
-                int boundaryWidth = child.IsNoEntryWindow ? BOUNDARY_WIDTH : 0;
+                int boundaryWidth = CollisionFilter.GetBoundaryWidth(child);
 
                 System.Diagnostics.Debug.WriteLine($"  Child {(child.IsNoEntryWindow ? "NoEntry" : "Normal")}: {childBounds}, Boundary: {boundaryWidth}px");
 
@@ -723,44 +673,12 @@ namespace MultiWindowActionGame.Windows
             );
 
             // 親が不可侵ウィンドウの場合、親の境界内に制限
-            if (window.Parent is GameWindow parentWindow && parentWindow.IsNoEntryWindow)
-            {
-                Rectangle parentBounds = parentWindow.CollisionBounds;
-
-                // 親の境界を超えないように制限
-                int adjustedX = proposedBounds.X;
-                int adjustedY = proposedBounds.Y;
-
-                if (proposedBounds.Left < parentBounds.Left)
-                    adjustedX = parentBounds.Left;
-                if (proposedBounds.Right > parentBounds.Right)
-                    adjustedX = parentBounds.Right - proposedBounds.Width;
-                if (proposedBounds.Top < parentBounds.Top)
-                    adjustedY = parentBounds.Top;
-                if (proposedBounds.Bottom > parentBounds.Bottom)
-                    adjustedY = parentBounds.Bottom - proposedBounds.Height;
-
-                proposedBounds = new Rectangle(
-                    adjustedX,
-                    adjustedY,
-                    proposedBounds.Width,
-                    proposedBounds.Height
-                );
-            }
+            proposedBounds = CollisionFilter.ConstrainToParentBounds(window, proposedBounds);
 
             Rectangle validBounds;
             if (collisionService != null)
             {
-                var options = new CollisionOptions
-                {
-                    ExcludeWindow = window,
-                    ExcludeChildren = true,  // 親ウィンドウが子を持つ場合、子も除外
-                    CheckNoEntryZones = true,
-                    CheckNoEntryBoundaries = true,
-                    CheckNormalWindows = window.IsNoEntryWindow,  // 不可侵ウィンドウは通常のウィンドウともぶつかる
-                    CheckButtons = window.IsNoEntryWindow,  // 不可侵ウィンドウはボタンともぶつかる
-                    UseZOrderFiltering = true
-                };
+                var options = CollisionFilter.CreateStandardOptions(window);
                 validBounds = collisionService.ValidatePosition(window.CollisionBounds, proposedBounds, options);
             }
             else
@@ -768,25 +686,8 @@ namespace MultiWindowActionGame.Windows
                 validBounds = ZoneManager.GetValidPosition(window.CollisionBounds, proposedBounds, window);
             }
 
-            // 親がある場合かつ自分自身が不可侵ウィンドウの場合、validBoundsを親の境界内に再制約（3pxバッファ）
-            if (window.Parent is GameWindow finalParentWindow && window.IsNoEntryWindow)
-            {
-                const int PARENT_BOUNDARY_BUFFER = 5; // 親境界とのバッファ（px）
-                Rectangle finalParentBounds = finalParentWindow.CollisionBounds;
-                int constrainedX = validBounds.X;
-                int constrainedY = validBounds.Y;
-
-                if (validBounds.Left < finalParentBounds.Left + PARENT_BOUNDARY_BUFFER)
-                    constrainedX = finalParentBounds.Left + PARENT_BOUNDARY_BUFFER;
-                if (validBounds.Right > finalParentBounds.Right - PARENT_BOUNDARY_BUFFER)
-                    constrainedX = finalParentBounds.Right - PARENT_BOUNDARY_BUFFER - validBounds.Width;
-                if (validBounds.Top < finalParentBounds.Top + PARENT_BOUNDARY_BUFFER)
-                    constrainedY = finalParentBounds.Top + PARENT_BOUNDARY_BUFFER;
-                if (validBounds.Bottom > finalParentBounds.Bottom - PARENT_BOUNDARY_BUFFER)
-                    constrainedY = finalParentBounds.Bottom - PARENT_BOUNDARY_BUFFER - validBounds.Height;
-
-                validBounds = new Rectangle(constrainedX, constrainedY, validBounds.Width, validBounds.Height);
-            }
+            // 親がある場合かつ自分自身が不可侵ウィンドウの場合、validBoundsを親の境界内に再制約（5pxバッファ）
+            validBounds = CollisionFilter.ApplyParentBoundaryBuffer(window, validBounds);
 
             return new Vector2(
                 validBounds.X - window.CollisionBounds.X,
@@ -813,16 +714,7 @@ namespace MultiWindowActionGame.Windows
             // CollisionService or fallback to ZoneManager
             if (collisionService != null)
             {
-                var options = new CollisionOptions
-                {
-                    ExcludeWindow = window,
-                    ExcludeChildren = true,  // 親ウィンドウが子を持つ場合、子も除外
-                    CheckNoEntryZones = true,
-                    CheckNoEntryBoundaries = true,
-                    CheckNormalWindows = window.IsNoEntryWindow,  // 不可侵ウィンドウは通常のウィンドウともぶつかる
-                    CheckButtons = window.IsNoEntryWindow,  // 不可侵ウィンドウはボタンともぶつかる
-                    UseZOrderFiltering = true
-                };
+                var options = CollisionFilter.CreateStandardOptions(window);
                 return collisionService.CheckCollision(checkBounds, options);
             }
             else

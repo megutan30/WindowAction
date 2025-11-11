@@ -55,21 +55,12 @@ namespace MultiWindowActionGame.Services
 
             foreach (var window in allWindows)
             {
-                // 除外ウィンドウはスキップ
-                if (window == excludeWindow) continue;
-
-                // ExcludeChildrenが有効な場合、除外ウィンドウの子孫もスキップ
-                if (excludeChildren && excludeWindow != null &&
-                    excludeWindow.GetAllDescendants().Contains(window)) continue;
-
-                // 親ウィンドウもスキップ（子が親の内部で移動する場合、親自体は障害物にならない）
-                if (excludeWindow != null && window == excludeWindow.Parent) continue;
+                // 統一的なフィルタリング処理を使用
+                if (CollisionFilter.ShouldSkipWindow(window, excludeWindow, excludeChildren))
+                    continue;
 
                 // 不可侵ウィンドウはスキップ（境界判定で処理済み）
                 if (window.IsNoEntryWindow) continue;
-
-                // 最小化されているウィンドウはスキップ
-                if (window.WindowState == FormWindowState.Minimized || window.IsMinimized) continue;
 
                 // Z-order考慮の可視性チェック
                 if (useZOrder && !visibilityService.IsWindowVisibleFromNoEntry(window, bounds, excludeWindow))

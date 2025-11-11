@@ -160,20 +160,8 @@ namespace MultiWindowActionGame.Managers
             collidingWindow = null;
             collisionRect = null;
 
-            // 除外すべきウィンドウのセットを作成
-            var excludedWindows = new HashSet<GameWindow>();
-            if (excludeWindow != null)
-            {
-                excludedWindows.Add(excludeWindow);
-                if (excludeChildren)
-                {
-                    // 子孫ウィンドウもすべて除外
-                    foreach (var descendant in excludeWindow.GetAllDescendants().OfType<GameWindow>())
-                    {
-                        excludedWindows.Add(descendant);
-                    }
-                }
-            }
+            // 統一的なフィルタリング処理を使用してセットを作成
+            var excludedWindows = CollisionFilter.CreateExcludedSet(excludeWindow, excludeChildren);
 
             // すべての不可侵ウィンドウをチェック
             foreach (var window in noEntryWindows)

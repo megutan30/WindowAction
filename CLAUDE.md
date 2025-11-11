@@ -2367,6 +2367,38 @@ NoEntryZoneManagerが962行の巨大クラスとなり、複数の責務（静�
 
 **実装期間**: 約3時間
 
+### 衝突判定フィルタリングロジック統一化（2025年1月27日）
+
+**背景**:
+バグ修正により、不可侵ウィンドウ周りの衝突判定コードに重複が発生。同じウィンドウスキップロジックが4箇所に散在し、保守性が低下していた。
+
+**実装内容**:
+
+**新規クラス作成**: `CollisionFilter`（静的ヘルパークラス）
+- `ShouldSkipWindow()`: ウィンドウをスキップすべきか判定
+  - 除外ウィンドウ、子孫ウィンドウ、親ウィンドウ、最小化チェックを統一
+- `CreateExcludedSet()`: 除外ウィンドウのHashSetを作成
+- `GetBoundaryWidth()`: 不可侵/通常ウィンドウの境界幅を取得
+
+**リファクタリング箇所**:
+1. `CollisionValidator.ValidatePosition` (line 231-245 → 232-233)
+   - 14行 → 2行（86%削減）
+2. `CollisionValidator.ValidateSize` (line 535-543 → 535-536)
+   - 9行 → 2行（78%削減）
+3. `ZOrderCollisionHelper.CheckNormalWindowCollision` (line 58-72 → 58-60)
+   - 15行 → 3行（80%削減）
+4. `NoEntryBoundaryCollider.CheckAnyCollision` (line 163-176 → 164)
+   - 14行 → 1行（93%削減）
+
+**成果**:
+- ✅ 重複コード約50行削除
+- ✅ 保守性向上（スキップロジックの一元管理）
+- ✅ テスタビリティ向上（CollisionFilterを個別にテスト可能）
+- ✅ コードの可読性向上（意図が明確に）
+- ✅ バグ修正が容易に（1箇所修正すれば全体に反映）
+
+**実装期間**: 約30分
+
 ---
 
 ## 参考資料
