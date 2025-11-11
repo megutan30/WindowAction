@@ -419,5 +419,126 @@ namespace MultiWindowActionGame.Player
                 return true;
             }
         }
+
+        /// <summary>
+        /// 横方向の移動に対するスイープ衝突判定
+        /// プレイヤーが細い場合に不可侵ウィンドウを貫通するのを防ぐ
+        /// </summary>
+        /// <param name="bounds">現在のプレイヤー境界</param>
+        /// <param name="movement">移動ベクトル</param>
+        /// <returns>調整された移動ベクトル</returns>
+        public Vector2 CheckHorizontalCollision(Rectangle bounds, Vector2 movement)
+        {
+            // 移動がない場合は早期リターン
+            if (Math.Abs(movement.X) < 0.1f)
+            {
+                return movement;
+            }
+
+            Vector2 adjustedMovement = movement;
+            float horizontalMovement = movement.X;
+            int moveDirection = Math.Sign(horizontalMovement);
+
+            // 横方向のスイープ境界を作成（現在位置から目標位置までをカバー）
+            int sweepLeft = moveDirection > 0 ? bounds.Left : bounds.Left + (int)horizontalMovement;
+            int sweepRight = moveDirection > 0 ? bounds.Right + (int)horizontalMovement : bounds.Right;
+            int sweepWidth = sweepRight - sweepLeft;
+
+            Rectangle horizontalSweepBounds = new Rectangle(
+                sweepLeft,
+                bounds.Top,
+                sweepWidth,
+                bounds.Height
+            );
+
+            // 1. 静的NoEntryZoneとの衝突チェック
+            var zones = noEntryZoneManager.Zones;
+            foreach (var zone in zones)
+            {
+                if (horizontalSweepBounds.IntersectsWith(zone.Bounds))
+                {
+                    // 衝突を検出 - 移動を制限
+                    if (moveDirection > 0) // 右移動
+                    {
+                        int maxX = zone.Bounds.Left - bounds.Width;
+                        adjustedMovement.X = Math.Min(adjustedMovement.X, maxX - bounds.X);
+                    }
+                    else // 左移動
+                    {
+                        int minX = zone.Bounds.Right;
+                        adjustedMovement.X = Math.Max(adjustedMovement.X, minX - bounds.X);
+                    }
+                }
+            }
+
+            // 2. 不可侵ウィンドウ境界との衝突チェック（Z-order + Region考慮）
+            var intersectingWindows = windowManager.GetIntersectingWindows(horizontalSweepBounds)
+                .Where(w => w.IsNoEntryWindow)
+                .OrderByDescending(w => windowManager.GetWindowZIndex(w))
+                .ToList();
+
+            foreach (var noEntryWindow in intersectingWindows)
+            {
+                // Z-order + Region考慮の境界判定
+                if (noEntryZoneManager.CheckNoEntryBoundaryCollision(noEntryWindow, horizontalSweepBounds, out var collisionRect) && collisionRect.HasValue)
+                {
+                    Rectangle boundary = collisionRect.Value;
+
+                    // 境界の左右のエッジを判定
+                    bool isLeftEdge = Math.Abs(boundary.Left - noEntryWindow.CollisionBounds.Left) < 3;
+                    bool isRightEdge = Math.Abs(boundary.Right - noEntryWindow.CollisionBounds.Right) < 3;
+
+                    // プレイヤーの移動方向に対して壁として機能するかチェック
+                    if (moveDirection > 0 && isLeftEdge) // 右移動 → 左壁
+                    {
+                        // プレイヤーの右端が境界の左端に達する直前で停止
+                        int maxX = boundary.Left - bounds.Width;
+                        adjustedMovement.X = Math.Min(adjustedMovement.X, maxX - bounds.X);
+                    }
+                    else if (moveDirection < 0 && isRightEdge) // 左移動 → 右壁
+                    {
+                        // プレイヤーの左端が境界の右端に達する直前で停止
+                        int minX = boundary.Right;
+                        adjustedMovement.X = Math.Max(adjustedMovement.X, minX - bounds.X);
+                    }
+                }
+            }
+
+            // 3. 通常ウィンドウとの衝突チェック（Z-order考慮）
+            var normalWindows = windowManager.GetIntersectingWindows(horizontalSweepBounds)
+                .Where(w => !w.IsNoEntryWindow)
+                .OrderByDescending(w => windowManager.GetWindowZIndex(w))
+                .ToList();
+
+            foreach (var window in normalWindows)
+            {
+                Rectangle windowBounds = window.CollisionBounds;
+
+                // Y軸の重なりをチェック
+                if (bounds.Bottom > windowBounds.Top && bounds.Top < windowBounds.Bottom)
+                {
+                    if (moveDirection > 0) // 右移動
+                    {
+                        // プレイヤーの右端がウィンドウの左端に達する直前で停止
+                        int maxX = windowBounds.Left - bounds.Width;
+                        if (bounds.Right <= windowBounds.Left)
+                        {
+                            adjustedMovement.X = Math.Min(adjustedMovement.X, maxX - bounds.X);
+                        }
+                    }
+                    else // 左移動
+                    {
+                        // プレイヤーの左端がウィンドウの右端に達する直前で停止
+                        int minX = windowBounds.Right;
+                        if (bounds.Left >= windowBounds.Right)
+                        {
+                            adjustedMovement.X = Math.Max(adjustedMovement.X, minX - bounds.X);
+                        }
+                    }
+                }
+            }
+
+            return adjustedMovement;
+        }
     }
 }
