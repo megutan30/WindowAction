@@ -329,6 +329,13 @@ namespace MultiWindowActionGame.Player
         private void HandleMovement(float deltaTime)
         {
             Vector2 movement = physics?.CalculateMovement(deltaTime) ?? Vector2.Zero;
+
+            // 横方向のスイープ衝突判定を適用（プレイヤーが細い場合の貫通を防ぐ）
+            if (physics != null && Math.Abs(movement.X) > 0.1f)
+            {
+                movement = physics.CheckHorizontalCollision(collisionBounds, movement);
+            }
+
             // 当たり判定領域で移動を計算
             Rectangle proposedCollision = new Rectangle(
                 collisionBounds.X + (int)movement.X,
