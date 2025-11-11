@@ -1007,14 +1007,7 @@ namespace MultiWindowActionGame.Windows
 
         public override void DrawStrategyMark(Graphics g, Rectangle bounds, bool isHovered)
         {
-            // 赤いアウトラインを描画（2px）
-            using (Pen redPen = new Pen(Color.Red, 2))
-            {
-                g.DrawRectangle(redPen, bounds.X + 1, bounds.Y + 1,
-                    bounds.Width - 2, bounds.Height - 2);
-            }
-
-            // リサイズマークも描画（親の実装を呼び出し）
+            // 赤いアウトラインはOutlineRendererが描画するため、ここではリサイズマークのみ描画
             base.DrawStrategyMark(g, bounds, isHovered);
         }
     }
@@ -1038,14 +1031,7 @@ namespace MultiWindowActionGame.Windows
 
         public override void DrawStrategyMark(Graphics g, Rectangle bounds, bool isHovered)
         {
-            // 赤いアウトラインを描画（2px）
-            using (Pen redPen = new Pen(Color.Red, 2))
-            {
-                g.DrawRectangle(redPen, bounds.X + 1, bounds.Y + 1,
-                    bounds.Width - 2, bounds.Height - 2);
-            }
-
-            // 移動マークも描画（親の実装を呼び出し）
+            // 赤いアウトラインはOutlineRendererが描画するため、ここでは移動マークのみ描画
             base.DrawStrategyMark(g, bounds, isHovered);
         }
     }
@@ -1069,14 +1055,7 @@ namespace MultiWindowActionGame.Windows
 
         public override void DrawStrategyMark(Graphics g, Rectangle bounds, bool isHovered)
         {
-            // 赤いアウトラインを描画（2px）
-            using (Pen redPen = new Pen(Color.Red, 2))
-            {
-                g.DrawRectangle(redPen, bounds.X + 1, bounds.Y + 1,
-                    bounds.Width - 2, bounds.Height - 2);
-            }
-
-            // 最小化マークも描画（親の実装を呼び出し）
+            // 赤いアウトラインはOutlineRendererが描画するため、ここでは最小化マークのみ描画
             base.DrawStrategyMark(g, bounds, isHovered);
         }
     }
