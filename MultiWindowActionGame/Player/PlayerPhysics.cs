@@ -452,7 +452,7 @@ namespace MultiWindowActionGame.Player
             );
 
             // 1. 静的NoEntryZoneとの衝突チェック
-            var zones = noEntryZoneManager.GetAllZones();
+            var zones = noEntryZoneManager.Zones;
             foreach (var zone in zones)
             {
                 if (horizontalSweepBounds.IntersectsWith(zone.Bounds))
