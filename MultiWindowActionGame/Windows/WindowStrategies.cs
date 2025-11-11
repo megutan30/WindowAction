@@ -543,9 +543,17 @@ namespace MultiWindowActionGame.Windows
             // デバッグ用ログ
             System.Diagnostics.Debug.WriteLine($"[CheckChildBoundaryContact] Current: {currentBounds}, Proposed: {proposedSize}, Shrinking W:{isShrinkingWidth} H:{isShrinkingHeight}");
 
-            // 全子孫ウィンドウをチェック（不可侵ウィンドウと通常ウィンドウの両方）
+            // 親ウィンドウの種類に応じて子ウィンドウのチェック範囲を決定
+            // - 親が不可侵ウィンドウの場合: すべての子（不可侵+通常）をチェック
+            // - 親が通常ウィンドウの場合: 不可侵の子のみをチェック
             foreach (var child in window.GetAllDescendants().OfType<GameWindow>())
             {
+                // 親が通常ウィンドウの場合、通常の子はスキップ（貫通を許可）
+                if (!window.IsNoEntryWindow && !child.IsNoEntryWindow)
+                {
+                    continue;
+                }
+
                 Rectangle childBounds = child.CollisionBounds;
                 // 不可侵ウィンドウの場合は境界を考慮、通常ウィンドウの場合は境界なし
                 int boundaryWidth = CollisionFilter.GetBoundaryWidth(child);
