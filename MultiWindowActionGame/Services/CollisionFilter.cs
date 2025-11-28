@@ -83,7 +83,7 @@ namespace MultiWindowActionGame.Services
         /// <returns>不可侵ウィンドウは3px、通常ウィンドウは0px</returns>
         public static int GetBoundaryWidth(GameWindow window)
         {
-            return window.IsNoEntryWindow ? 3 : 0;
+            return window.IsNoEntryWindow ? 5 : 0;
         }
 
         /// <summary>

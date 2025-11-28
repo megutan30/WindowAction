@@ -557,14 +557,13 @@ namespace MultiWindowActionGame.Windows
                 // 不可侵ウィンドウの場合は境界を考慮、通常ウィンドウの場合は境界なし
                 int boundaryWidth = CollisionFilter.GetBoundaryWidth(child);
 
-                System.Diagnostics.Debug.WriteLine($"  Child {(child.IsNoEntryWindow ? "NoEntry" : "Normal")}: {childBounds}, Boundary: {boundaryWidth}px");
 
                 // 幅方向のチェック
                 if (isShrinkingWidth)
                 {
                     // 縮小時: 親の右辺が子の右辺境界に達する場合
                     int proposedRight = currentBounds.X + constrainedSize.Width;
-                    int childRightBoundary = childBounds.Right + boundaryWidth;
+                    int childRightBoundary = childBounds.Right;
 
                     System.Diagnostics.Debug.WriteLine($"    Width(Shrink): proposedRight={proposedRight}, childRightBoundary={childRightBoundary}, currentRight={currentBounds.Right}");
 
@@ -573,7 +572,7 @@ namespace MultiWindowActionGame.Windows
                         // Y座標の重なりもチェック
                         if (currentBounds.Bottom > childBounds.Top && currentBounds.Top < childBounds.Bottom)
                         {
-                            int minWidth = childRightBoundary - currentBounds.X + bufferSize;
+                            int minWidth = childRightBoundary - currentBounds.X + bufferSize + boundaryWidth;
                             if (minWidth > 0 && minWidth > constrainedSize.Width)
                             {
                                 System.Diagnostics.Debug.WriteLine($"    *** Width CONSTRAINED: {constrainedSize.Width} -> {minWidth}");
@@ -588,7 +587,7 @@ namespace MultiWindowActionGame.Windows
                 {
                     // 縮小時: 親の下辺が子の下辺境界に達する場合
                     int proposedBottom = currentBounds.Y + constrainedSize.Height;
-                    int childBottomBoundary = childBounds.Bottom + boundaryWidth;
+                    int childBottomBoundary = childBounds.Bottom;
 
                     System.Diagnostics.Debug.WriteLine($"    Height(Shrink): proposedBottom={proposedBottom}, childBottomBoundary={childBottomBoundary}, currentBottom={currentBounds.Bottom}");
 
@@ -598,7 +597,7 @@ namespace MultiWindowActionGame.Windows
                         int proposedRight = currentBounds.X + constrainedSize.Width;
                         if (proposedRight > childBounds.Left && currentBounds.Left < childBounds.Right)
                         {
-                            int minHeight = childBottomBoundary - currentBounds.Y + 5;
+                            int minHeight = childBottomBoundary - currentBounds.Y + bufferSize + boundaryWidth;
                             if (minHeight > 0 && minHeight > constrainedSize.Height)
                             {
                                 System.Diagnostics.Debug.WriteLine($"    *** Height CONSTRAINED: {constrainedSize.Height} -> {minHeight}");
