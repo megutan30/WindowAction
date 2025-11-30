@@ -36,7 +36,7 @@ namespace MultiWindowActionGame.Managers
         public List<Rectangle> GetBoundaryRectangles(GameWindow window)
         {
             var bounds = window.CollisionBounds;
-            const int borderThickness = 5;
+            const int borderThickness = CollisionFilter.NOENTRY_BOUNDARY_WIDTH;
             var rectangles = new List<Rectangle>(4);
 
             // 上辺

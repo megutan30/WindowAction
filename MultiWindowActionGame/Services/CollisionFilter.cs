@@ -13,6 +13,18 @@ namespace MultiWindowActionGame.Services
     public static class CollisionFilter
     {
         /// <summary>
+        /// 不可侵ウィンドウの境界幅（px）
+        /// NoEntryBoundaryColliderで生成される境界矩形の幅
+        /// </summary>
+        public const int NOENTRY_BOUNDARY_WIDTH = 5;
+
+        /// <summary>
+        /// 親ウィンドウの境界バッファ（子が親の端から保つべき距離、px）
+        /// 不可侵ウィンドウが親ウィンドウ内で移動・リサイズする際の余白
+        /// </summary>
+        public const int PARENT_BOUNDARY_BUFFER = 5;
+
+        /// <summary>
         /// 指定されたウィンドウをスキップすべきかチェック
         /// </summary>
         /// <param name="window">チェック対象のウィンドウ</param>
@@ -80,10 +92,10 @@ namespace MultiWindowActionGame.Services
         /// ウィンドウの境界幅を取得
         /// </summary>
         /// <param name="window">対象ウィンドウ</param>
-        /// <returns>不可侵ウィンドウは3px、通常ウィンドウは0px</returns>
+        /// <returns>不可侵ウィンドウはNOENTRY_BOUNDARY_WIDTH、通常ウィンドウは0px</returns>
         public static int GetBoundaryWidth(GameWindow window)
         {
-            return window.IsNoEntryWindow ? 5 : 0;
+            return window.IsNoEntryWindow ? NOENTRY_BOUNDARY_WIDTH : 0;
         }
 
         /// <summary>
@@ -162,9 +174,9 @@ namespace MultiWindowActionGame.Services
         /// </summary>
         /// <param name="window">対象ウィンドウ</param>
         /// <param name="validBounds">検証済みの境界</param>
-        /// <param name="bufferSize">バッファサイズ（px）</param>
+        /// <param name="bufferSize">バッファサイズ（px）デフォルトはPARENT_BOUNDARY_BUFFER</param>
         /// <returns>バッファ制約適用後の境界</returns>
-        public static Rectangle ApplyParentBoundaryBuffer(GameWindow window, Rectangle validBounds, int bufferSize = 5)
+        public static Rectangle ApplyParentBoundaryBuffer(GameWindow window, Rectangle validBounds, int bufferSize = PARENT_BOUNDARY_BUFFER)
         {
             if (window.Parent is not GameWindow parentWindow || !window.IsNoEntryWindow)
             {
@@ -192,9 +204,9 @@ namespace MultiWindowActionGame.Services
         /// </summary>
         /// <param name="window">対象ウィンドウ</param>
         /// <param name="newSize">新しいサイズ</param>
-        /// <param name="bufferSize">バッファサイズ（px）</param>
+        /// <param name="bufferSize">バッファサイズ（px）デフォルトはPARENT_BOUNDARY_BUFFER</param>
         /// <returns>バッファ制約適用後のサイズ</returns>
-        public static Size ApplyParentBoundaryBufferForResize(GameWindow window, Size newSize, int bufferSize = 5)
+        public static Size ApplyParentBoundaryBufferForResize(GameWindow window, Size newSize, int bufferSize = PARENT_BOUNDARY_BUFFER)
         {
             if (window.Parent is not GameWindow parentWindow || !window.IsNoEntryWindow)
             {

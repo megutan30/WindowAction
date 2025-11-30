@@ -32,32 +32,6 @@ namespace MultiWindowActionGame.Services
             this.windowManager = windowManager ?? throw new ArgumentNullException(nameof(windowManager));
         }
 
-        /// <summary>
-        /// Sweep Boundsを作成（現在位置から目標位置までの移動経路全体をカバー）
-        /// </summary>
-        private Rectangle CreateSweepBounds(Rectangle currentBounds, Rectangle proposedBounds, bool xAxisOnly, bool yAxisOnly)
-        {
-            int minX = Math.Min(currentBounds.X, proposedBounds.X);
-            int maxX = Math.Max(currentBounds.Right, proposedBounds.Right);
-            int minY = Math.Min(currentBounds.Y, proposedBounds.Y);
-            int maxY = Math.Max(currentBounds.Bottom, proposedBounds.Bottom);
-
-            // X軸のみの場合、Y座標は現在位置を使用
-            if (xAxisOnly)
-            {
-                return new Rectangle(minX, currentBounds.Y, maxX - minX, currentBounds.Height);
-            }
-            // Y軸のみの場合、X座標は現在位置または調整後のX位置を使用
-            else if (yAxisOnly)
-            {
-                return new Rectangle(proposedBounds.X, minY, proposedBounds.Width, maxY - minY);
-            }
-            // 両軸の場合
-            else
-            {
-                return new Rectangle(minX, minY, maxX - minX, maxY - minY);
-            }
-        }
 
         /// <summary>
         /// 移動可能な位置に調整した境界を返す（Sweep方式で移動経路全体をチェック）
@@ -78,11 +52,9 @@ namespace MultiWindowActionGame.Services
                 foreach (var zone in noEntryZoneManager.Zones)
                 {
                     // X軸方向の移動をチェック（移動経路全体をSweep）
-                    Rectangle xMovement = CreateSweepBounds(
-                        new Rectangle(currentBounds.X, currentBounds.Y, currentBounds.Width, currentBounds.Height),
-                        new Rectangle(proposedBounds.X, currentBounds.Y, proposedBounds.Width, currentBounds.Height),
-                        xAxisOnly: true,
-                        yAxisOnly: false
+                    Rectangle xMovement = SweepBoundsHelper.CreateSweepBoundsXAxis(
+                        currentBounds,
+                        new Rectangle(proposedBounds.X, currentBounds.Y, proposedBounds.Width, currentBounds.Height)
                     );
 
                     if (xMovement.IntersectsWith(zone.Bounds))
@@ -110,11 +82,9 @@ namespace MultiWindowActionGame.Services
 
                     // Y軸方向の移動をチェック（移動経路全体をSweep）
                     int adjustedX = bestAdjustedX ?? proposedBounds.X;
-                    Rectangle yMovement = CreateSweepBounds(
+                    Rectangle yMovement = SweepBoundsHelper.CreateSweepBoundsYAxis(
                         new Rectangle(adjustedX, currentBounds.Y, proposedBounds.Width, currentBounds.Height),
-                        new Rectangle(adjustedX, proposedBounds.Y, proposedBounds.Width, proposedBounds.Height),
-                        xAxisOnly: false,
-                        yAxisOnly: true
+                        new Rectangle(adjustedX, proposedBounds.Y, proposedBounds.Width, proposedBounds.Height)
                     );
 
                     if (yMovement.IntersectsWith(zone.Bounds))
@@ -147,11 +117,9 @@ namespace MultiWindowActionGame.Services
             {
                 // Y軸方向の移動をチェック（移動経路全体をSweep）
                 int adjustedXForBoundary = bestAdjustedX ?? proposedBounds.X;
-                Rectangle yMovement = CreateSweepBounds(
+                Rectangle yMovement = SweepBoundsHelper.CreateSweepBoundsYAxis(
                     new Rectangle(adjustedXForBoundary, currentBounds.Y, proposedBounds.Width, currentBounds.Height),
-                    new Rectangle(adjustedXForBoundary, proposedBounds.Y, proposedBounds.Width, proposedBounds.Height),
-                    xAxisOnly: false,
-                    yAxisOnly: true
+                    new Rectangle(adjustedXForBoundary, proposedBounds.Y, proposedBounds.Width, proposedBounds.Height)
                 );
 
                 // CheckAnyCollisionを使用（ExcludeChildren対応）
@@ -184,11 +152,9 @@ namespace MultiWindowActionGame.Services
                 }
 
                 // X軸方向の移動をチェック（移動経路全体をSweep）
-                Rectangle xMovement = CreateSweepBounds(
-                    new Rectangle(currentBounds.X, currentBounds.Y, currentBounds.Width, currentBounds.Height),
-                    new Rectangle(proposedBounds.X, currentBounds.Y, proposedBounds.Width, currentBounds.Height),
-                    xAxisOnly: true,
-                    yAxisOnly: false
+                Rectangle xMovement = SweepBoundsHelper.CreateSweepBoundsXAxis(
+                    currentBounds,
+                    new Rectangle(proposedBounds.X, currentBounds.Y, proposedBounds.Width, currentBounds.Height)
                 );
 
                 // CheckAnyCollisionを使用（ExcludeChildren対応）
@@ -238,11 +204,9 @@ namespace MultiWindowActionGame.Services
                     Rectangle windowBounds = window.CollisionBounds;
 
                     // X軸方向の移動をチェック（移動経路全体をSweep）
-                    Rectangle xMovement = CreateSweepBounds(
-                        new Rectangle(currentBounds.X, currentBounds.Y, currentBounds.Width, currentBounds.Height),
-                        new Rectangle(proposedBounds.X, currentBounds.Y, proposedBounds.Width, currentBounds.Height),
-                        xAxisOnly: true,
-                        yAxisOnly: false
+                    Rectangle xMovement = SweepBoundsHelper.CreateSweepBoundsXAxis(
+                        currentBounds,
+                        new Rectangle(proposedBounds.X, currentBounds.Y, proposedBounds.Width, currentBounds.Height)
                     );
 
                     if (xMovement.IntersectsWith(windowBounds))
@@ -270,11 +234,9 @@ namespace MultiWindowActionGame.Services
 
                     // Y軸方向の移動をチェック（移動経路全体をSweep）
                     int adjustedXForNormalWindow = bestAdjustedX ?? proposedBounds.X;
-                    Rectangle yMovement = CreateSweepBounds(
+                    Rectangle yMovement = SweepBoundsHelper.CreateSweepBoundsYAxis(
                         new Rectangle(adjustedXForNormalWindow, currentBounds.Y, proposedBounds.Width, currentBounds.Height),
-                        new Rectangle(adjustedXForNormalWindow, proposedBounds.Y, proposedBounds.Width, proposedBounds.Height),
-                        xAxisOnly: false,
-                        yAxisOnly: true
+                        new Rectangle(adjustedXForNormalWindow, proposedBounds.Y, proposedBounds.Width, proposedBounds.Height)
                     );
 
                     if (yMovement.IntersectsWith(windowBounds))
@@ -315,11 +277,9 @@ namespace MultiWindowActionGame.Services
                     Rectangle buttonBounds = button.Bounds;
 
                     // X軸方向の移動をチェック（移動経路全体をSweep）
-                    Rectangle xMovement = CreateSweepBounds(
-                        new Rectangle(currentBounds.X, currentBounds.Y, currentBounds.Width, currentBounds.Height),
-                        new Rectangle(proposedBounds.X, currentBounds.Y, proposedBounds.Width, currentBounds.Height),
-                        xAxisOnly: true,
-                        yAxisOnly: false
+                    Rectangle xMovement = SweepBoundsHelper.CreateSweepBoundsXAxis(
+                        currentBounds,
+                        new Rectangle(proposedBounds.X, currentBounds.Y, proposedBounds.Width, currentBounds.Height)
                     );
 
                     if (xMovement.IntersectsWith(buttonBounds))
@@ -347,11 +307,9 @@ namespace MultiWindowActionGame.Services
 
                     // Y軸方向の移動をチェック（移動経路全体をSweep）
                     int adjustedXForButton = bestAdjustedX ?? proposedBounds.X;
-                    Rectangle yMovement = CreateSweepBounds(
+                    Rectangle yMovement = SweepBoundsHelper.CreateSweepBoundsYAxis(
                         new Rectangle(adjustedXForButton, currentBounds.Y, proposedBounds.Width, currentBounds.Height),
-                        new Rectangle(adjustedXForButton, proposedBounds.Y, proposedBounds.Width, proposedBounds.Height),
-                        xAxisOnly: false,
-                        yAxisOnly: true
+                        new Rectangle(adjustedXForButton, proposedBounds.Y, proposedBounds.Width, proposedBounds.Height)
                     );
 
                     if (yMovement.IntersectsWith(buttonBounds))

@@ -97,6 +97,55 @@ namespace MultiWindowActionGame.Windows
         // 各ストラテジーで実装が必要なメソッド
         public abstract void DrawStrategyMark(Graphics g, Rectangle bounds, bool isHovered);
         protected abstract Cursor GetStrategyCursor();
+
+        // 衝突判定の統一化ヘルパーメソッド
+        /// <summary>
+        /// 衝突判定を実行（CollisionService優先、Fallback to ZoneManager）
+        /// </summary>
+        protected bool CheckCollision(GameWindow window, Rectangle checkBounds)
+        {
+            if (collisionService != null)
+            {
+                var options = CollisionFilter.CreateStandardOptions(window);
+                return collisionService.CheckCollision(checkBounds, options);
+            }
+            else
+            {
+                return ZoneManager.IntersectsWithAnyZone(checkBounds, window);
+            }
+        }
+
+        /// <summary>
+        /// サイズを検証（CollisionService優先、Fallback to ZoneManager）
+        /// </summary>
+        protected Size ValidateSize(GameWindow window, Size proposedSize)
+        {
+            if (collisionService != null)
+            {
+                var options = CollisionFilter.CreateStandardOptions(window);
+                return collisionService.ValidateSize(window.CollisionBounds, proposedSize, options);
+            }
+            else
+            {
+                return ZoneManager.GetValidSize(window.CollisionBounds, proposedSize, window);
+            }
+        }
+
+        /// <summary>
+        /// 位置を検証（CollisionService優先、Fallback to ZoneManager）
+        /// </summary>
+        protected Rectangle ValidatePosition(GameWindow window, Rectangle proposedBounds)
+        {
+            if (collisionService != null)
+            {
+                var options = CollisionFilter.CreateStandardOptions(window);
+                return collisionService.ValidatePosition(window.CollisionBounds, proposedBounds, options);
+            }
+            else
+            {
+                return ZoneManager.GetValidPosition(window.CollisionBounds, proposedBounds, window);
+            }
+        }
     }
     public static class StrategyMarkUtility
     {
@@ -223,16 +272,7 @@ namespace MultiWindowActionGame.Windows
             );
 
             // CollisionService or fallback to ZoneManager
-            bool hasCollision;
-            if (collisionService != null)
-            {
-                var options = CollisionFilter.CreateStandardOptions(window);
-                hasCollision = collisionService.CheckCollision(proposedBounds, options);
-            }
-            else
-            {
-                hasCollision = ZoneManager.IntersectsWithAnyZone(proposedBounds, window);
-            }
+            bool hasCollision = CheckCollision(window, proposedBounds);
 
             // Z-order + Region考慮の不可侵ウィンドウ境界判定を含む（自分自身を除外）
             if (!hasCollision)
@@ -400,16 +440,7 @@ namespace MultiWindowActionGame.Windows
             proposedSize = CollisionFilter.ConstrainSizeToParentBounds(window, proposedSize);
 
             // 境界チェックの強化（不可侵領域との衝突チェック）
-            Size validSize;
-            if (collisionService != null)
-            {
-                var options = CollisionFilter.CreateStandardOptions(window);
-                validSize = collisionService.ValidateSize(window.CollisionBounds, proposedSize, options);
-            }
-            else
-            {
-                validSize = ZoneManager.GetValidSize(window.CollisionBounds, proposedSize, window);
-            }
+            Size validSize = ValidateSize(window, proposedSize);
 
             // 子要素がある場合の動的サイズチェック
             if (window.Children.Count > 0)
@@ -534,7 +565,7 @@ namespace MultiWindowActionGame.Windows
             // リサイズ方向を判定
             bool isShrinkingWidth = proposedSize.Width < window.Size.Width;
             bool isShrinkingHeight = proposedSize.Height < window.Size.Height;
-            int bufferSize = 5;
+            int bufferSize = CollisionFilter.PARENT_BOUNDARY_BUFFER;
 
             Size constrainedSize = proposedSize;
             Rectangle currentBounds = window.CollisionBounds;
@@ -681,16 +712,7 @@ namespace MultiWindowActionGame.Windows
             // 親が不可侵ウィンドウの場合、親の境界内に制限
             proposedBounds = CollisionFilter.ConstrainToParentBounds(window, proposedBounds);
 
-            Rectangle validBounds;
-            if (collisionService != null)
-            {
-                var options = CollisionFilter.CreateStandardOptions(window);
-                validBounds = collisionService.ValidatePosition(window.CollisionBounds, proposedBounds, options);
-            }
-            else
-            {
-                validBounds = ZoneManager.GetValidPosition(window.CollisionBounds, proposedBounds, window);
-            }
+            Rectangle validBounds = ValidatePosition(window, proposedBounds);
 
             // 親がある場合かつ自分自身が不可侵ウィンドウの場合、validBoundsを親の境界内に再制約（5pxバッファ）
             validBounds = CollisionFilter.ApplyParentBoundaryBuffer(window, validBounds);
@@ -718,16 +740,7 @@ namespace MultiWindowActionGame.Windows
             );
 
             // CollisionService or fallback to ZoneManager
-            if (collisionService != null)
-            {
-                var options = CollisionFilter.CreateStandardOptions(window);
-                return collisionService.CheckCollision(checkBounds, options);
-            }
-            else
-            {
-                // Z-order + Region考慮の不可侵ウィンドウ境界判定を含む（自分自身を除外）
-                return ZoneManager.IntersectsWithAnyZone(checkBounds, window);
-            }
+            return CheckCollision(window, checkBounds);
         }
         public override void HandleWindowMessage(GameWindow window, Message m)
         {
