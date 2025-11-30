@@ -603,7 +603,9 @@ namespace MultiWindowActionGame.Windows
                         // Y座標の重なりもチェック
                         if (currentBounds.Bottom > childBounds.Top && currentBounds.Top < childBounds.Bottom)
                         {
-                            int minWidth = childRightBoundary - currentBounds.X + bufferSize + boundaryWidth;
+                            // 不可侵ウィンドウの境界は外周5pxで定義済みのため、bufferSizeのみを使用
+                            // boundaryWidthを加算すると重複計算になる（10px = 5 + 5）
+                            int minWidth = childRightBoundary - currentBounds.X + bufferSize;
                             if (minWidth > 0 && minWidth > constrainedSize.Width)
                             {
                                 System.Diagnostics.Debug.WriteLine($"    *** Width CONSTRAINED: {constrainedSize.Width} -> {minWidth}");
@@ -628,7 +630,9 @@ namespace MultiWindowActionGame.Windows
                         int proposedRight = currentBounds.X + constrainedSize.Width;
                         if (proposedRight > childBounds.Left && currentBounds.Left < childBounds.Right)
                         {
-                            int minHeight = childBottomBoundary - currentBounds.Y + bufferSize + boundaryWidth;
+                            // 不可侵ウィンドウの境界は外周5pxで定義済みのため、bufferSizeのみを使用
+                            // boundaryWidthを加算すると重複計算になる（10px = 5 + 5）
+                            int minHeight = childBottomBoundary - currentBounds.Y + bufferSize;
                             if (minHeight > 0 && minHeight > constrainedSize.Height)
                             {
                                 System.Diagnostics.Debug.WriteLine($"    *** Height CONSTRAINED: {constrainedSize.Height} -> {minHeight}");
