@@ -504,39 +504,7 @@ namespace MultiWindowActionGame.Player
                 }
             }
 
-            // 3. 通常ウィンドウとの衝突チェック（Z-order考慮）
-            var normalWindows = windowManager.GetIntersectingWindows(horizontalSweepBounds)
-                .Where(w => !w.IsNoEntryWindow)
-                .OrderByDescending(w => windowManager.GetWindowZIndex(w))
-                .ToList();
-
-            foreach (var window in normalWindows)
-            {
-                Rectangle windowBounds = window.CollisionBounds;
-
-                // Y軸の重なりをチェック
-                if (bounds.Bottom > windowBounds.Top && bounds.Top < windowBounds.Bottom)
-                {
-                    if (moveDirection > 0) // 右移動
-                    {
-                        // プレイヤーの右端がウィンドウの左端に達する直前で停止
-                        int maxX = windowBounds.Left - bounds.Width;
-                        if (bounds.Right <= windowBounds.Left)
-                        {
-                            adjustedMovement.X = Math.Min(adjustedMovement.X, maxX - bounds.X);
-                        }
-                    }
-                    else // 左移動
-                    {
-                        // プレイヤーの左端がウィンドウの右端に達する直前で停止
-                        int minX = windowBounds.Right;
-                        if (bounds.Left >= windowBounds.Right)
-                        {
-                            adjustedMovement.X = Math.Max(adjustedMovement.X, minX - bounds.X);
-                        }
-                    }
-                }
-            }
+            // ステップ3削除 - プレイヤーは通常ウィンドウを貫通できる（仕様）
 
             return adjustedMovement;
         }
