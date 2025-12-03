@@ -19,17 +19,20 @@ namespace MultiWindowActionGame.Services
         private readonly NoEntryBoundaryCollider boundaryCollider;
         private readonly ZOrderCollisionHelper zOrderHelper;
         private readonly IWindowManager windowManager;
+        private readonly ZOrderVisibilityService visibilityService; 
 
         public CollisionValidator(
             INoEntryZoneManager noEntryZoneManager,
             NoEntryBoundaryCollider boundaryCollider,
             ZOrderCollisionHelper zOrderHelper,
-            IWindowManager windowManager)
+            IWindowManager windowManager,
+            ZOrderVisibilityService visibilityService)
         {
             this.noEntryZoneManager = noEntryZoneManager ?? throw new ArgumentNullException(nameof(noEntryZoneManager));
             this.boundaryCollider = boundaryCollider ?? throw new ArgumentNullException(nameof(boundaryCollider));
             this.zOrderHelper = zOrderHelper ?? throw new ArgumentNullException(nameof(zOrderHelper));
             this.windowManager = windowManager ?? throw new ArgumentNullException(nameof(windowManager));
+            this.visibilityService = visibilityService ?? throw new ArgumentNullException(nameof(visibilityService));
         }
 
 
@@ -208,9 +211,14 @@ namespace MultiWindowActionGame.Services
                         currentBounds,
                         new Rectangle(proposedBounds.X, currentBounds.Y, proposedBounds.Width, currentBounds.Height)
                     );
-
                     if (xMovement.IntersectsWith(windowBounds))
                     {
+                        // Z-order可視性判定を追加
+                        if (options.UseZOrderFiltering &&
+                            !visibilityService.IsWindowVisibleFromNoEntry(window, xMovement, options.ExcludeWindow))
+                        {
+                            continue;  // 隠れているウィンドウはスキップ
+                        }
                         int candidateX;
                         if (currentBounds.X + currentBounds.Width <= windowBounds.X)
                         {
@@ -241,6 +249,12 @@ namespace MultiWindowActionGame.Services
 
                     if (yMovement.IntersectsWith(windowBounds))
                     {
+                        // Z-order可視性判定を追加
+                        if (options.UseZOrderFiltering &&
+                            !visibilityService.IsWindowVisibleFromNoEntry(window, yMovement, options.ExcludeWindow))
+                        {
+                            continue;  // 隠れているウィンドウはスキップ
+                        }
                         int candidateY;
                         if (currentBounds.Y + currentBounds.Height <= windowBounds.Y)
                         {
@@ -508,6 +522,12 @@ namespace MultiWindowActionGame.Services
 
                         if (xResize.IntersectsWith(window.CollisionBounds))
                         {
+                            // Z-order可視性判定を追加
+                            if (options.UseZOrderFiltering &&
+                                !visibilityService.IsWindowVisibleFromNoEntry(window, xResize, options.ExcludeWindow))
+                            {
+                                continue;  // 隠れているウィンドウはスキップ
+                            }
                             // 左から右に拡大している場合
                             if (currentBounds.X < window.CollisionBounds.X)
                             {
@@ -535,6 +555,12 @@ namespace MultiWindowActionGame.Services
 
                         if (yResize.IntersectsWith(window.CollisionBounds))
                         {
+                            // Z-order可視性判定を追加
+                            if (options.UseZOrderFiltering &&
+                                !visibilityService.IsWindowVisibleFromNoEntry(window, yResize, options.ExcludeWindow))
+                            {
+                                continue;  // 隠れているウィンドウはスキップ
+                            }
                             // 上から下に拡大している場合
                             if (currentBounds.Y < window.CollisionBounds.Y)
                             {
