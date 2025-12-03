@@ -131,7 +131,9 @@ namespace MultiWindowActionGame.Managers
                     {
                         if (!visibleRegion.IsEmpty(dummyGraphics))
                         {
-                            collisionRect = boundary;
+                            // 見えている部分のみの境界矩形を取得
+                            RectangleF visibleBounds = visibleRegion.GetBounds(dummyGraphics);
+                            collisionRect = Rectangle.Ceiling(visibleBounds);
                             return true;
                         }
                     }
