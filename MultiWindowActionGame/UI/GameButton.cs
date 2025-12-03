@@ -200,7 +200,7 @@ namespace MultiWindowActionGame.UI
 
         if (lastValidParent != null &&
             !lastValidParent.IsMinimized &&
-            lastValidParent.AdjustedBounds.IntersectsWith(Bounds))
+            lastValidParent.CollisionBounds.IntersectsWith(Bounds))
         {
             SetParent(lastValidParent);
         }

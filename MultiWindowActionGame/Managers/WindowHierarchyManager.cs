@@ -43,7 +43,7 @@ namespace MultiWindowActionGame.Managers
                 // 現在の親子関係が有効かチェック
                 if (operatedWindow.Parent != null)
                 {
-                    if (!IsWindowContainedWithinBounds(operatedWindow.Parent.AdjustedBounds, operatedWindow.AdjustedBounds))
+                    if (!IsWindowContainedWithinBounds(operatedWindow.Parent.CollisionBounds, operatedWindow.CollisionBounds))
                     {
                         var oldParent = operatedWindow.Parent;
                         oldParent.RemoveChild(operatedWindow);
@@ -55,7 +55,7 @@ namespace MultiWindowActionGame.Managers
                 // 子ウィンドウとの関係をチェック
                 foreach (var child in operatedWindow.Children.OfType<GameWindow>().ToList())
                 {
-                    if (!IsWindowContainedWithinBounds(operatedWindow.AdjustedBounds, child.AdjustedBounds))
+                    if (!IsWindowContainedWithinBounds(operatedWindow.CollisionBounds, child.CollisionBounds))
                     {
                         operatedWindow.RemoveChild(child);
                         RemoveParentChildRelation(child);
@@ -83,7 +83,7 @@ namespace MultiWindowActionGame.Managers
 
                 foreach (var potentialParent in allPotentialParents)
                 {
-                    if (IsWindowContainedWithinBounds(potentialParent.AdjustedBounds, operatedWindow.AdjustedBounds))
+                    if (IsWindowContainedWithinBounds(potentialParent.CollisionBounds, operatedWindow.CollisionBounds))
                     {
                         int currentIndex = zOrderManager.GetWindowZIndex(potentialParent, allWindows);
                         if (bestParentIndex < currentIndex)
@@ -126,7 +126,7 @@ namespace MultiWindowActionGame.Managers
 
                 foreach (var potentialChild in potentialChildren)
                 {
-                    if (IsWindowContainedWithinBounds(operatedWindow.AdjustedBounds, potentialChild.AdjustedBounds))
+                    if (IsWindowContainedWithinBounds(operatedWindow.CollisionBounds, potentialChild.CollisionBounds))
                     {
                         // 既存の親子関係があっても、より適切な親となれる場合は変更
                         if (potentialChild.Parent == null ||

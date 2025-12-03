@@ -751,10 +751,10 @@ namespace MultiWindowActionGame.Player
             if (!windowInteraction!.IsValidMove(newCollision, Parent))
             {
                 newCollision = new Rectangle(
-                    Math.Max(Parent?.AdjustedBounds.Left ?? 0,
-                        Math.Min(collisionBounds.X, (Parent?.AdjustedBounds.Right ?? Program.mainForm?.ClientSize.Width ?? 1920) - newSize.Width)),
-                    Math.Max(Parent?.AdjustedBounds.Top ?? 0,
-                        Math.Min(collisionBounds.Y, (Parent?.AdjustedBounds.Bottom ?? Program.mainForm?.ClientSize.Height ?? 1080) - newSize.Height)),
+                    Math.Max(Parent?.CollisionBounds.Left ?? 0,
+                        Math.Min(collisionBounds.X, (Parent?.CollisionBounds.Right ?? Program.mainForm?.ClientSize.Width ?? 1920) - newSize.Width)),
+                    Math.Max(Parent?.CollisionBounds.Top ?? 0,
+                        Math.Min(collisionBounds.Y, (Parent?.CollisionBounds.Bottom ?? Program.mainForm?.ClientSize.Height ?? 1080) - newSize.Height)),
                     newSize.Width,
                     newSize.Height
                 );
