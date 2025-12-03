@@ -5,6 +5,7 @@ using System.Numerics;
 using MultiWindowActionGame.Core;
 using MultiWindowActionGame.Interfaces;
 using MultiWindowActionGame.Managers;
+using MultiWindowActionGame.Services;
 using MultiWindowActionGame.UI;
 using MultiWindowActionGame.Utilities;
 using MultiWindowActionGame.Windows;
@@ -484,9 +485,11 @@ namespace MultiWindowActionGame.Player
                 {
                     Rectangle boundary = collisionRect.Value;
 
-                    // 境界の左右のエッジを判定
-                    bool isLeftEdge = Math.Abs(boundary.Left - noEntryWindow.CollisionBounds.Left) < 3;
-                    bool isRightEdge = Math.Abs(boundary.Right - noEntryWindow.CollisionBounds.Right) < 3;
+                    // 境界の左右のエッジを判定（プレイヤーサイズを考慮）
+                    // 境界幅（5px）+ プレイヤーの半分 + バッファ（2px）で動的に許容値を計算
+                    int edgeTolerance = CollisionFilter.NOENTRY_BOUNDARY_WIDTH + (bounds.Width / 2) + 2;
+                    bool isLeftEdge = Math.Abs(boundary.Left - noEntryWindow.CollisionBounds.Left) < edgeTolerance;
+                    bool isRightEdge = Math.Abs(boundary.Right - noEntryWindow.CollisionBounds.Right) < edgeTolerance;
 
                     // プレイヤーの移動方向に対して壁として機能するかチェック
                     if (moveDirection > 0 && isLeftEdge) // 右移動 → 左壁
