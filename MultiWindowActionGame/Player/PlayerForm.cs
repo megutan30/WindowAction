@@ -339,7 +339,16 @@ namespace MultiWindowActionGame.Player
             // 垂直方向のスイープ衝突判定を適用（ジャンプ時の天井貫通を防ぐ）
             if (physics != null && Math.Abs(movement.Y) > 0.1f)
             {
+                Vector2 originalMovement = movement;
                 movement = physics.CheckVerticalCollision(collisionBounds, movement);
+
+                // 天井衝突検出: 上昇中に移動が制限された場合
+                if (originalMovement.Y < 0 && movement.Y > originalMovement.Y)
+                {
+                    // 天井にぶつかった - 速度をリセットして落下開始
+                    physics.SetVerticalVelocity(0);
+                    animation.ResetScale();
+                }
             }
 
             // 当たり判定領域で移動を計算
