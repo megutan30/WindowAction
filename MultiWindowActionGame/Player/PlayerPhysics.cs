@@ -491,18 +491,43 @@ namespace MultiWindowActionGame.Player
                     bool isLeftEdge = Math.Abs(boundary.Left - noEntryWindow.CollisionBounds.Left) < edgeTolerance;
                     bool isRightEdge = Math.Abs(boundary.Right - noEntryWindow.CollisionBounds.Right) < edgeTolerance;
 
-                    // プレイヤーの移動方向に対して壁として機能するかチェック
-                    if (moveDirection > 0 && isLeftEdge) // 右移動 → 左壁
+                    // プレイヤーが不可侵ウィンドウの内側にいるか外側にいるかを判定
+                    bool isInsideWindow = bounds.Left >= noEntryWindow.CollisionBounds.Left &&
+                                          bounds.Right <= noEntryWindow.CollisionBounds.Right &&
+                                          bounds.Top >= noEntryWindow.CollisionBounds.Top &&
+                                          bounds.Bottom <= noEntryWindow.CollisionBounds.Bottom;
+
+                    if (isInsideWindow)
                     {
-                        // プレイヤーの右端が境界の左端に達する直前で停止
-                        int maxX = boundary.Left - bounds.Width;
-                        adjustedMovement.X = Math.Min(adjustedMovement.X, maxX - bounds.X);
+                        // 内側にいる場合: 内側から外側への移動を制限
+                        if (moveDirection > 0 && isRightEdge) // 右移動 → 右壁（内側）
+                        {
+                            // プレイヤーの右端が境界の内側に達する直前で停止
+                            int maxX = boundary.Left - bounds.Width;
+                            adjustedMovement.X = Math.Min(adjustedMovement.X, maxX - bounds.X);
+                        }
+                        else if (moveDirection < 0 && isLeftEdge) // 左移動 → 左壁（内側）
+                        {
+                            // プレイヤーの左端が境界の内側に達する直前で停止
+                            int minX = boundary.Right;
+                            adjustedMovement.X = Math.Max(adjustedMovement.X, minX - bounds.X);
+                        }
                     }
-                    else if (moveDirection < 0 && isRightEdge) // 左移動 → 右壁
+                    else
                     {
-                        // プレイヤーの左端が境界の右端に達する直前で停止
-                        int minX = boundary.Right;
-                        adjustedMovement.X = Math.Max(adjustedMovement.X, minX - bounds.X);
+                        // 外側にいる場合: 外側から内側への移動を制限（従来の動作）
+                        if (moveDirection > 0 && isLeftEdge) // 右移動 → 左壁（外側）
+                        {
+                            // プレイヤーの右端が境界の左端に達する直前で停止
+                            int maxX = boundary.Left - bounds.Width;
+                            adjustedMovement.X = Math.Min(adjustedMovement.X, maxX - bounds.X);
+                        }
+                        else if (moveDirection < 0 && isRightEdge) // 左移動 → 右壁（外側）
+                        {
+                            // プレイヤーの左端が境界の右端に達する直前で停止
+                            int minX = boundary.Right;
+                            adjustedMovement.X = Math.Max(adjustedMovement.X, minX - bounds.X);
+                        }
                     }
                 }
             }
