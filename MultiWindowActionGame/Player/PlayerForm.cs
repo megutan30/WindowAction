@@ -336,6 +336,12 @@ namespace MultiWindowActionGame.Player
                 movement = physics.CheckHorizontalCollision(collisionBounds, movement);
             }
 
+            // 垂直方向のスイープ衝突判定を適用（ジャンプ時の天井貫通を防ぐ）
+            if (physics != null && Math.Abs(movement.Y) > 0.1f)
+            {
+                movement = physics.CheckVerticalCollision(collisionBounds, movement);
+            }
+
             // 当たり判定領域で移動を計算
             Rectangle proposedCollision = new Rectangle(
                 collisionBounds.X + (int)movement.X,

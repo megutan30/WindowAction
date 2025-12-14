@@ -27,5 +27,11 @@ namespace MultiWindowActionGame.Player
         /// プレイヤーが細い場合に不可侵ウィンドウを貫通するのを防ぐ
         /// </summary>
         Vector2 CheckHorizontalCollision(Rectangle bounds, Vector2 movement);
+
+        /// <summary>
+        /// 垂直方向の移動に対するスイープ衝突判定
+        /// プレイヤーがジャンプ時に不可侵ウィンドウの天井を貫通するのを防ぐ
+        /// </summary>
+        Vector2 CheckVerticalCollision(Rectangle bounds, Vector2 movement);
     }
 }
