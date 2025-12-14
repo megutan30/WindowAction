@@ -76,9 +76,10 @@ namespace MultiWindowActionGame.Player
             onParentChanged?.Invoke(newParent);
         }
 
-        public Rectangle HandleWindowCollisions(Rectangle newBounds, Rectangle currentBounds)
+        public (Rectangle adjustedBounds, bool hitCeiling) HandleWindowCollisions(Rectangle newBounds, Rectangle currentBounds)
         {
             var adjustedBounds = newBounds;
+            bool hitCeiling = false;
             adjustedBounds = GetNoEntryZoneManagerSafely().GetValidPosition(currentBounds, adjustedBounds);
 
             var intersectingWindows = windowManager.GetIntersectingWindows(adjustedBounds);
@@ -97,7 +98,9 @@ namespace MultiWindowActionGame.Player
                 }
                 else if (currentBounds.Top >= windowBounds.Bottom && adjustedBounds.Top < windowBounds.Bottom)
                 {
+                    // 天井衝突（上昇中にウィンドウの下辺にぶつかった）
                     adjustedBounds.Y = windowBounds.Bottom;
+                    hitCeiling = true;
                 }
                 else if (currentBounds.Right <= windowBounds.Left && adjustedBounds.Right > windowBounds.Left)
                 {
@@ -109,7 +112,7 @@ namespace MultiWindowActionGame.Player
                 }
             }
 
-            return adjustedBounds;
+            return (adjustedBounds, hitCeiling);
         }
 
         public bool IsValidMove(Rectangle newBounds, GameWindow? currentParent)

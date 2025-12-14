@@ -377,7 +377,15 @@ namespace MultiWindowActionGame.Player
             // ウィンドウ衝突処理（親がnullの場合のみ）
             if (Parent == null)
             {
-                proposedCollision = windowInteraction.HandleWindowCollisions(proposedCollision, collisionBounds);
+                var (adjustedCollision, hitCeiling) = windowInteraction.HandleWindowCollisions(proposedCollision, collisionBounds);
+                proposedCollision = adjustedCollision;
+
+                // 天井衝突時は速度をリセット
+                if (hitCeiling)
+                {
+                    physics?.SetVerticalVelocity(0);
+                    animation.ResetScale();
+                }
             }
 
             // ボタンとの衝突判定（ウィンドウ内外に関係なく実行）

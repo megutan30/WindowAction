@@ -23,7 +23,9 @@
       "Bash(dotnet clean:*)",
       "Bash(findstr:*)",
       "Bash(cd:*)",
-      "Bash(git log:*)"
+      "Bash(git log:*)",
+      "Bash(Select-String -Pattern \"error|成功|エラー\")",
+      "Bash(Select-Object -First 5)"
     ],
     "deny": []
   }

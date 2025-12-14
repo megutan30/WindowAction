@@ -13,7 +13,7 @@ namespace MultiWindowActionGame.Player
         void HandleWindowTransitions(Rectangle newBounds, Rectangle currentBounds);
         void SetParent(GameWindow? newParent);
         void SetOnParentChangedCallback(Action<GameWindow?> callback);
-        Rectangle HandleWindowCollisions(Rectangle newBounds, Rectangle currentBounds);
+        (Rectangle adjustedBounds, bool hitCeiling) HandleWindowCollisions(Rectangle newBounds, Rectangle currentBounds);
         bool IsValidMove(Rectangle newBounds, GameWindow? currentParent);
         Rectangle AdjustMovement(Rectangle oldBounds, Rectangle newBounds, GameWindow? currentParent, Action? onCeilingHit);
         void OnMinimize();
