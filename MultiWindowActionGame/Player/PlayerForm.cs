@@ -371,9 +371,6 @@ namespace MultiWindowActionGame.Player
                 });
             }
 
-            // ウィンドウ遷移処理
-            windowInteraction.HandleWindowTransitions(proposedCollision, collisionBounds);
-
             // ウィンドウ衝突処理（親がnullの場合のみ）
             if (Parent == null)
             {
@@ -390,6 +387,9 @@ namespace MultiWindowActionGame.Player
 
             // ボタンとの衝突判定（ウィンドウ内外に関係なく実行）
             proposedCollision = HandleButtonCollisions(proposedCollision);
+
+            // ウィンドウ遷移処理
+            windowInteraction.HandleWindowTransitions(proposedCollision, collisionBounds);
 
             // デスクトップアイコンとの衝突判定（一時的に無効化）
             // TODO: デスクトップアイコン判定を再有効化する場合はコメントを外す
