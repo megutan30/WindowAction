@@ -5,6 +5,7 @@ using System.Windows.Forms;
 using MultiWindowActionGame.Collision;
 using MultiWindowActionGame.Interfaces;
 using MultiWindowActionGame.Managers;
+using MultiWindowActionGame.Player;
 using MultiWindowActionGame.Windows;
 
 namespace MultiWindowActionGame.Services
@@ -351,6 +352,90 @@ namespace MultiWindowActionGame.Services
                 }
             }
 
+            // プレイヤーとの衝突判定（不可侵ウィンドウが移動する場合）
+            if (options.CheckPlayer)
+            {
+                var player = windowManager.GetPlayer();
+                if (player != null && options.ExcludeWindow != null)
+                {
+                    Rectangle playerBounds = player.CollisionBounds;
+
+                    // プレイヤーがウィンドウの子孫の場合はスキップ（親が子を押すことを防止）
+                    if (!IsPlayerDescendantOfWindow(player, options.ExcludeWindow))
+                    {
+                        // X軸方向の移動をチェック
+                        Rectangle xMovement = new Rectangle(
+                            proposedBounds.X,
+                            currentBounds.Y,
+                            proposedBounds.Width,
+                            currentBounds.Height
+                        );
+
+                        if (xMovement.IntersectsWith(playerBounds))
+                        {
+                            int candidateX;
+
+                            if (currentBounds.Right <= playerBounds.Left)
+                            {
+                                // 左から右への移動 → プレイヤーの左端で停止
+                                candidateX = playerBounds.Left - proposedBounds.Width;
+                            }
+                            else if (currentBounds.Left >= playerBounds.Right)
+                            {
+                                // 右から左への移動 → プレイヤーの右端で停止
+                                candidateX = playerBounds.Right;
+                            }
+                            else
+                            {
+                                // 既に重なっている → 現在位置を維持
+                                candidateX = currentBounds.X;
+                            }
+
+                            if (!bestAdjustedX.HasValue ||
+                                Math.Abs(candidateX - currentBounds.X) < Math.Abs(bestAdjustedX.Value - currentBounds.X))
+                            {
+                                bestAdjustedX = candidateX;
+                            }
+                        }
+
+                        // Y軸方向の移動をチェック（X軸調整後の位置を使用）
+                        Rectangle yMovement = new Rectangle(
+                            bestAdjustedX ?? proposedBounds.X,
+                            proposedBounds.Y,
+                            proposedBounds.Width,
+                            proposedBounds.Height
+                        );
+
+                        if (yMovement.IntersectsWith(playerBounds))
+                        {
+                            int candidateY;
+
+                            if (currentBounds.Bottom <= playerBounds.Top)
+                            {
+                                // 上から下への移動 → プレイヤーの上端で停止
+                                candidateY = playerBounds.Top - proposedBounds.Height;
+                            }
+                            else if (currentBounds.Top >= playerBounds.Bottom)
+                            {
+                                // 下から上への移動 → プレイヤーの下端で停止
+                                candidateY = playerBounds.Bottom;
+                            }
+                            else
+                            {
+                                // 既に重なっている → 現在位置を維持
+                                candidateY = currentBounds.Y;
+                            }
+
+                            if (!bestAdjustedY.HasValue ||
+                                Math.Abs(candidateY - currentBounds.Y) < Math.Abs(bestAdjustedY.Value - currentBounds.Y))
+                            {
+                                bestAdjustedY = candidateY;
+                            }
+                        }
+                    }
+                }
+            }
+
             // 最終的な調整を適用
             return new Rectangle(
                 bestAdjustedX ?? proposedBounds.X,
@@ -575,6 +660,73 @@ namespace MultiWindowActionGame.Services
                 }
             }
 
+            // プレイヤーとの衝突判定（不可侵ウィンドウがリサイズする場合、拡大方向のみ）
+            if (options.CheckPlayer)
+            {
+                var player = windowManager.GetPlayer();
+                if (player != null && options.ExcludeWindow != null)
+                {
+                    Rectangle playerBounds = player.CollisionBounds;
+
+                    // プレイヤーがウィンドウの子孫の場合はスキップ（親が子を押すことを防止）
+                    if (!IsPlayerDescendantOfWindow(player, options.ExcludeWindow))
+                    {
+                        // X方向の拡大をチェック
+                        if (isGrowingWidth)
+                        {
+                            Rectangle xResize = new Rectangle(
+                                currentBounds.X,
+                                currentBounds.Y,
+                                proposedSize.Width,
+                                currentBounds.Height
+                            );
+
+                            if (xResize.IntersectsWith(playerBounds))
+                            {
+                                // 左から右に拡大している場合
+                                if (currentBounds.X < playerBounds.X)
+                                {
+                                    int candidateWidth = playerBounds.Left - currentBounds.X;
+
+                                    if (!minWidth.HasValue || candidateWidth < minWidth.Value)
+                                    {
+                                        minWidth = candidateWidth;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Y方向の拡大をチェック
+                        if (isGrowingHeight)
+                        {
+                            // X方向で調整された幅、またはX方向に拡大していない場合は現在の幅を使用
+                            int widthForYCheck = isGrowingWidth ? (minWidth ?? proposedSize.Width) : currentBounds.Width;
+
+                            Rectangle yResize = new Rectangle(
+                                currentBounds.X,
+                                currentBounds.Y,
+                                widthForYCheck,
+                                proposedSize.Height
+                            );
+
+                            if (yResize.IntersectsWith(playerBounds))
+                            {
+                                // 上から下に拡大している場合
+                                if (currentBounds.Y < playerBounds.Y)
+                                {
+                                    int candidateHeight = playerBounds.Top - currentBounds.Y;
+
+                                    if (!minHeight.HasValue || candidateHeight < minHeight.Value)
+                                    {
+                                        minHeight = candidateHeight;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // 最終的なサイズを適用
             if (minWidth.HasValue && isGrowingWidth)
             {
@@ -586,6 +738,27 @@ namespace MultiWindowActionGame.Services
             }
 
             return adjustedSize;
+        }
+
+        /// <summary>
+        /// プレイヤーが指定ウィンドウまたはその子孫の子であるかチェック
+        /// 親が子を押すことを防止するために使用
+        /// </summary>
+        /// <param name="player">プレイヤー</param>
+        /// <param name="window">チェック対象ウィンドウ</param>
+        /// <returns>プレイヤーがウィンドウの子孫の場合true</returns>
+        private bool IsPlayerDescendantOfWindow(PlayerForm player, GameWindow window)
+        {
+            GameWindow? currentParent = player.Parent;
+            while (currentParent != null)
+            {
+                if (currentParent == window)
+                {
+                    return true;
+                }
+                currentParent = currentParent.Parent;
+            }
+            return false;
         }
     }
 }

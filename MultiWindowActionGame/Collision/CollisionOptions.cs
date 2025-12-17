@@ -38,6 +38,11 @@ namespace MultiWindowActionGame.Collision
         public bool CheckButtons { get; set; } = false;
 
         /// <summary>
+        /// プレイヤーとの衝突判定を行うか（不可侵ウィンドウが移動する場合に使用）
+        /// </summary>
+        public bool CheckPlayer { get; set; } = false;
+
+        /// <summary>
         /// Z-orderを考慮したフィルタリングを行うか
         /// </summary>
         public bool UseZOrderFiltering { get; set; } = true;

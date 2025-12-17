@@ -115,6 +115,7 @@ namespace MultiWindowActionGame.Services
                 CheckNoEntryBoundaries = true,
                 CheckNormalWindows = excludeWindow.IsNoEntryWindow,  // 不可侵ウィンドウは通常のウィンドウともぶつかる
                 CheckButtons = excludeWindow.IsNoEntryWindow,  // 不可侵ウィンドウはボタンともぶつかる
+                CheckPlayer = excludeWindow.IsNoEntryWindow,  // 不可侵ウィンドウはプレイヤーともぶつかる
                 UseZOrderFiltering = true
             };
         }
