@@ -280,9 +280,6 @@ namespace MultiWindowActionGame.Windows
                 // 子の不可侵境界との接触をチェックしてサイズを調整
                 newSize = CheckChildBoundaryContact(window, originalSize, newSize);
 
-                // 親がある場合かつ自分自身が不可侵ウィンドウの場合、親の境界内に収まるようにサイズを制約（5pxバッファ）
-                newSize = CollisionFilter.ApplyParentBoundaryBufferForResize(window, newSize);
-
                 // スケールを再計算（調整されたサイズに基づく）
                 scale = new SizeF((float)newSize.Width / originalSize.Width, (float)newSize.Height / originalSize.Height);
 
@@ -436,7 +433,7 @@ namespace MultiWindowActionGame.Windows
                     Math.Min(windowMaxSize.Height, originalSize.Height + dy))
             );
 
-            // 親が不可侵ウィンドウの場合、親の境界内に制限
+            // 親がある場合、親の境界内に制限（不可侵ウィンドウの場合は5pxバッファ付き）
             proposedSize = CollisionFilter.ConstrainSizeToParentBounds(window, proposedSize);
 
             // 境界チェックの強化（不可侵領域との衝突チェック）
@@ -713,13 +710,10 @@ namespace MultiWindowActionGame.Windows
                 window.CollisionBounds.Height
             );
 
-            // 親が不可侵ウィンドウの場合、親の境界内に制限
+            // 親がある場合、親の境界内に制限（不可侵ウィンドウの場合は5pxバッファ付き）
             proposedBounds = CollisionFilter.ConstrainToParentBounds(window, proposedBounds);
 
             Rectangle validBounds = ValidatePosition(window, proposedBounds);
-
-            // 親がある場合かつ自分自身が不可侵ウィンドウの場合、validBoundsを親の境界内に再制約（5pxバッファ）
-            validBounds = CollisionFilter.ApplyParentBoundaryBuffer(window, validBounds);
 
             return new Vector2(
                 validBounds.X - window.CollisionBounds.X,

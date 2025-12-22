@@ -121,38 +121,43 @@ namespace MultiWindowActionGame.Services
         }
 
         /// <summary>
-        /// 親が不可侵ウィンドウの場合、境界内に位置を制限
+        /// 親がある場合、境界内に位置を制限
+        /// 子が不可侵ウィンドウの場合は境界線（5px）を考慮してバッファを適用
         /// </summary>
         /// <param name="window">対象ウィンドウ</param>
         /// <param name="proposedBounds">提案された境界</param>
         /// <returns>制約適用後の境界</returns>
         public static Rectangle ConstrainToParentBounds(GameWindow window, Rectangle proposedBounds)
         {
-            if (window.Parent is not GameWindow parentWindow || !parentWindow.IsNoEntryWindow)
+            if (window.Parent is not GameWindow parentWindow)
             {
                 return proposedBounds;
             }
 
             Rectangle parentBounds = parentWindow.CollisionBounds;
 
-            // 親の境界を超えないように制限
-            int adjustedX = Math.Max(parentBounds.Left,
-                Math.Min(parentBounds.Right - proposedBounds.Width, proposedBounds.X));
-            int adjustedY = Math.Max(parentBounds.Top,
-                Math.Min(parentBounds.Bottom - proposedBounds.Height, proposedBounds.Y));
+            // 子が不可侵ウィンドウの場合は境界線（5px）を考慮
+            int bufferSize = window.IsNoEntryWindow ? PARENT_BOUNDARY_BUFFER : 0;
+
+            // 親の境界を超えないように制限（不可侵ウィンドウの場合はバッファ付き）
+            int adjustedX = Math.Max(parentBounds.Left + bufferSize,
+                Math.Min(parentBounds.Right - bufferSize - proposedBounds.Width, proposedBounds.X));
+            int adjustedY = Math.Max(parentBounds.Top + bufferSize,
+                Math.Min(parentBounds.Bottom - bufferSize - proposedBounds.Height, proposedBounds.Y));
 
             return new Rectangle(adjustedX, adjustedY, proposedBounds.Width, proposedBounds.Height);
         }
 
         /// <summary>
-        /// 親が不可侵ウィンドウの場合、境界内にサイズを制限
+        /// 親がある場合、境界内にサイズを制限
+        /// 子が不可侵ウィンドウの場合は境界線（5px）を考慮してバッファを適用
         /// </summary>
         /// <param name="window">対象ウィンドウ</param>
         /// <param name="proposedSize">提案されたサイズ</param>
         /// <returns>制約適用後のサイズ</returns>
         public static Size ConstrainSizeToParentBounds(GameWindow window, Size proposedSize)
         {
-            if (window.Parent is not GameWindow parentWindow || !parentWindow.IsNoEntryWindow)
+            if (window.Parent is not GameWindow parentWindow)
             {
                 return proposedSize;
             }
@@ -160,80 +165,17 @@ namespace MultiWindowActionGame.Services
             Rectangle parentBounds = parentWindow.CollisionBounds;
             Rectangle windowBounds = window.CollisionBounds;
 
-            // 親の境界を超えないように最大サイズを制限
-            int maxWidth = parentBounds.Right - windowBounds.Left;
-            int maxHeight = parentBounds.Bottom - windowBounds.Top;
+            // 子が不可侵ウィンドウの場合は境界線（5px）を考慮
+            int bufferSize = window.IsNoEntryWindow ? PARENT_BOUNDARY_BUFFER : 0;
+
+            // 親の境界を超えないように最大サイズを制限（不可侵ウィンドウの場合はバッファ付き）
+            int maxWidth = parentBounds.Right - bufferSize - windowBounds.Left;
+            int maxHeight = parentBounds.Bottom - bufferSize - windowBounds.Top;
 
             return new Size(
                 Math.Min(proposedSize.Width, maxWidth),
                 Math.Min(proposedSize.Height, maxHeight)
             );
-        }
-
-        /// <summary>
-        /// 不可侵ウィンドウの親境界バッファ制約を適用（移動用）
-        /// </summary>
-        /// <param name="window">対象ウィンドウ</param>
-        /// <param name="validBounds">検証済みの境界</param>
-        /// <param name="bufferSize">バッファサイズ（px）デフォルトはPARENT_BOUNDARY_BUFFER</param>
-        /// <returns>バッファ制約適用後の境界</returns>
-        public static Rectangle ApplyParentBoundaryBuffer(GameWindow window, Rectangle validBounds, int bufferSize = PARENT_BOUNDARY_BUFFER)
-        {
-            if (window.Parent is not GameWindow parentWindow || !window.IsNoEntryWindow)
-            {
-                return validBounds;
-            }
-
-            Rectangle parentBounds = parentWindow.CollisionBounds;
-            int constrainedX = validBounds.X;
-            int constrainedY = validBounds.Y;
-
-            if (validBounds.Left < parentBounds.Left + bufferSize)
-                constrainedX = parentBounds.Left + bufferSize;
-            if (validBounds.Right > parentBounds.Right - bufferSize)
-                constrainedX = parentBounds.Right - bufferSize - validBounds.Width;
-            if (validBounds.Top < parentBounds.Top + bufferSize)
-                constrainedY = parentBounds.Top + bufferSize;
-            if (validBounds.Bottom > parentBounds.Bottom - bufferSize)
-                constrainedY = parentBounds.Bottom - bufferSize - validBounds.Height;
-
-            return new Rectangle(constrainedX, constrainedY, validBounds.Width, validBounds.Height);
-        }
-
-        /// <summary>
-        /// 不可侵ウィンドウの親境界バッファ制約を適用（リサイズ用）
-        /// </summary>
-        /// <param name="window">対象ウィンドウ</param>
-        /// <param name="newSize">新しいサイズ</param>
-        /// <param name="bufferSize">バッファサイズ（px）デフォルトはPARENT_BOUNDARY_BUFFER</param>
-        /// <returns>バッファ制約適用後のサイズ</returns>
-        public static Size ApplyParentBoundaryBufferForResize(GameWindow window, Size newSize, int bufferSize = PARENT_BOUNDARY_BUFFER)
-        {
-            if (window.Parent is not GameWindow parentWindow || !window.IsNoEntryWindow)
-            {
-                return newSize;
-            }
-
-            Rectangle parentBounds = parentWindow.CollisionBounds;
-            Rectangle currentBounds = window.CollisionBounds;
-
-            // 親の境界を超えないように幅を制限（バッファ考慮）
-            int maxWidth = parentBounds.Right - currentBounds.X - bufferSize;
-            int constrainedWidth = newSize.Width;
-            if (newSize.Width > maxWidth)
-            {
-                constrainedWidth = Math.Max(100, maxWidth); // 最小サイズ100pxを保証
-            }
-
-            // 親の境界を超えないように高さを制限（バッファ考慮）
-            int maxHeight = parentBounds.Bottom - currentBounds.Y - bufferSize;
-            int constrainedHeight = newSize.Height;
-            if (newSize.Height > maxHeight)
-            {
-                constrainedHeight = Math.Max(100, maxHeight); // 最小サイズ100pxを保証
-            }
-
-            return new Size(constrainedWidth, constrainedHeight);
         }
     }
 }
