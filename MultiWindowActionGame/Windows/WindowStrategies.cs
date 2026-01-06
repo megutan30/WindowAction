@@ -5,6 +5,7 @@ using MultiWindowActionGame.Core;
 using MultiWindowActionGame.Interfaces;
 using MultiWindowActionGame.Collision;
 using MultiWindowActionGame.Services;
+using MultiWindowActionGame.Managers;
 using System;
 using System.Drawing;
 using System.Numerics;
@@ -31,6 +32,8 @@ namespace MultiWindowActionGame.Windows
         protected readonly IGameSettings? gameSettings;
         protected readonly INoEntryZoneManager? noEntryZoneManager;
         protected readonly ICollisionService? collisionService;
+        protected readonly IWindowManager? windowManager;
+        protected readonly NoEntryBoundaryCollider? boundaryCollider;
 
         // 不可侵ウィンドウフラグ（デフォルトはfalse）
         public virtual bool IsNoEntry => false;
@@ -42,12 +45,16 @@ namespace MultiWindowActionGame.Windows
             IInputService? inputService = null,
             IGameSettings? gameSettings = null,
             INoEntryZoneManager? noEntryZoneManager = null,
-            ICollisionService? collisionService = null)
+            ICollisionService? collisionService = null,
+            IWindowManager? windowManager = null,
+            NoEntryBoundaryCollider? boundaryCollider = null)
         {
             this.inputService = inputService;
             this.gameSettings = gameSettings;
             this.noEntryZoneManager = noEntryZoneManager;
             this.collisionService = collisionService;
+            this.windowManager = windowManager;
+            this.boundaryCollider = boundaryCollider;
 
             // Fallback to static reference for backward compatibility
             settings = gameSettings?.Window ?? GameSettings.Current.Window;
@@ -200,8 +207,10 @@ namespace MultiWindowActionGame.Windows
             IInputService? inputService = null,
             IGameSettings? gameSettings = null,
             INoEntryZoneManager? noEntryZoneManager = null,
-            ICollisionService? collisionService = null)
-            : base(inputService, gameSettings, noEntryZoneManager, collisionService)
+            ICollisionService? collisionService = null,
+            IWindowManager? windowManager = null,
+            NoEntryBoundaryCollider? boundaryCollider = null)
+            : base(inputService, gameSettings, noEntryZoneManager, collisionService, windowManager, boundaryCollider)
         {
         }
 
@@ -220,8 +229,10 @@ namespace MultiWindowActionGame.Windows
             IInputService? inputService = null,
             IGameSettings? gameSettings = null,
             INoEntryZoneManager? noEntryZoneManager = null,
-            ICollisionService? collisionService = null)
-            : base(inputService, gameSettings, noEntryZoneManager, collisionService)
+            ICollisionService? collisionService = null,
+            IWindowManager? windowManager = null,
+            NoEntryBoundaryCollider? boundaryCollider = null)
+            : base(inputService, gameSettings, noEntryZoneManager, collisionService, windowManager, boundaryCollider)
         {
             resizeEffect = new ResizeEffect();
             WindowEffectManager.Current.AddEffect(resizeEffect);
@@ -254,7 +265,7 @@ namespace MultiWindowActionGame.Windows
             // 早期リターン条件を強化（パフォーマンス最適化）
             var currentSize = window.CollisionBounds.Size;
             if (newSize.Width == currentSize.Width && newSize.Height == currentSize.Height) return;
-            
+
             // 最小変更闾値を設定（微小な変更での不要な処理を回避）
             int deltaWidth = Math.Abs(newSize.Width - currentSize.Width);
             int deltaHeight = Math.Abs(newSize.Height - currentSize.Height);
@@ -433,8 +444,22 @@ namespace MultiWindowActionGame.Windows
                     Math.Min(windowMaxSize.Height, originalSize.Height + dy))
             );
 
-            // 親がある場合、親の境界内に制限（不可侵ウィンドウの場合は5pxバッファ付き）
-            proposedSize = CollisionFilter.ConstrainSizeToParentBounds(window, proposedSize);
+            // 親がある場合、親の境界内にサイズを制限
+            if (window.Parent is GameWindow parentWindow && parentWindow.IsNoEntryWindow)
+            {
+                // 不可侵親の場合: Z-order可視性を考慮
+                var windowMgr = windowManager ?? WindowManager.Current;
+                var collider = boundaryCollider ??
+                    throw new InvalidOperationException("NoEntryBoundaryCollider required for NoEntry parent");
+
+                proposedSize = CollisionFilter.ConstrainSizeToVisibleParentBoundaries(
+                    window, proposedSize, windowMgr, collider);
+            }
+            else
+            {
+                // 通常親の場合: 従来の制約（不可侵ウィンドウの場合は5pxバッファ付き）
+                proposedSize = CollisionFilter.ConstrainSizeToParentBounds(window, proposedSize);
+            }
 
             // 境界チェックの強化（不可侵領域との衝突チェック）
             Size validSize = ValidateSize(window, proposedSize);
@@ -568,7 +593,7 @@ namespace MultiWindowActionGame.Windows
             Rectangle currentBounds = window.CollisionBounds;
 
             // デバッグ用ログ
-            System.Diagnostics.Debug.WriteLine($"[CheckChildBoundaryContact] Current: {currentBounds}, Proposed: {proposedSize}, Shrinking W:{isShrinkingWidth} H:{isShrinkingHeight}");
+            //System.Diagnostics.Debug.WriteLine($"[CheckChildBoundaryContact] Current: {currentBounds}, Proposed: {proposedSize}, Shrinking W:{isShrinkingWidth} H:{isShrinkingHeight}");
 
             // 親ウィンドウの種類に応じて子ウィンドウのチェック範囲を決定
             // - 親が不可侵ウィンドウの場合: すべての子（不可侵+通常）をチェック
@@ -593,7 +618,7 @@ namespace MultiWindowActionGame.Windows
                     int proposedRight = currentBounds.X + constrainedSize.Width;
                     int childRightBoundary = childBounds.Right;
 
-                    System.Diagnostics.Debug.WriteLine($"    Width(Shrink): proposedRight={proposedRight}, childRightBoundary={childRightBoundary}, currentRight={currentBounds.Right}");
+                    //System.Diagnostics.Debug.WriteLine($"    Width(Shrink): proposedRight={proposedRight}, childRightBoundary={childRightBoundary}, currentRight={currentBounds.Right}");
 
                     if (proposedRight <= childRightBoundary && currentBounds.Right > childRightBoundary)
                     {
@@ -605,7 +630,7 @@ namespace MultiWindowActionGame.Windows
                             int minWidth = childRightBoundary - currentBounds.X + bufferSize;
                             if (minWidth > 0 && minWidth > constrainedSize.Width)
                             {
-                                System.Diagnostics.Debug.WriteLine($"    *** Width CONSTRAINED: {constrainedSize.Width} -> {minWidth}");
+                                //System.Diagnostics.Debug.WriteLine($"    *** Width CONSTRAINED: {constrainedSize.Width} -> {minWidth}");
                                 constrainedSize.Width = minWidth;
                             }
                         }
@@ -619,7 +644,7 @@ namespace MultiWindowActionGame.Windows
                     int proposedBottom = currentBounds.Y + constrainedSize.Height;
                     int childBottomBoundary = childBounds.Bottom;
 
-                    System.Diagnostics.Debug.WriteLine($"    Height(Shrink): proposedBottom={proposedBottom}, childBottomBoundary={childBottomBoundary}, currentBottom={currentBounds.Bottom}");
+                    //System.Diagnostics.Debug.WriteLine($"    Height(Shrink): proposedBottom={proposedBottom}, childBottomBoundary={childBottomBoundary}, currentBottom={currentBounds.Bottom}");
 
                     if (proposedBottom <= childBottomBoundary && currentBounds.Bottom > childBottomBoundary)
                     {
@@ -632,7 +657,7 @@ namespace MultiWindowActionGame.Windows
                             int minHeight = childBottomBoundary - currentBounds.Y + bufferSize;
                             if (minHeight > 0 && minHeight > constrainedSize.Height)
                             {
-                                System.Diagnostics.Debug.WriteLine($"    *** Height CONSTRAINED: {constrainedSize.Height} -> {minHeight}");
+                                //System.Diagnostics.Debug.WriteLine($"    *** Height CONSTRAINED: {constrainedSize.Height} -> {minHeight}");
                                 constrainedSize.Height = minHeight;
                             }
                         }
@@ -659,8 +684,10 @@ namespace MultiWindowActionGame.Windows
             IInputService? inputService = null,
             IGameSettings? gameSettings = null,
             INoEntryZoneManager? noEntryZoneManager = null,
-            ICollisionService? collisionService = null)
-            : base(inputService, gameSettings, noEntryZoneManager, collisionService)
+            ICollisionService? collisionService = null,
+            IWindowManager? windowManager = null,
+            NoEntryBoundaryCollider? boundaryCollider = null)
+            : base(inputService, gameSettings, noEntryZoneManager, collisionService, windowManager, boundaryCollider)
         {
             movementEffect = new MovementEffect();
             WindowEffectManager.Current.AddEffect(movementEffect);
@@ -710,8 +737,22 @@ namespace MultiWindowActionGame.Windows
                 window.CollisionBounds.Height
             );
 
-            // 親がある場合、親の境界内に制限（不可侵ウィンドウの場合は5pxバッファ付き）
-            proposedBounds = CollisionFilter.ConstrainToParentBounds(window, proposedBounds);
+            // 親がある場合、親の境界内に制限
+            if (window.Parent is GameWindow parentWindow && parentWindow.IsNoEntryWindow)
+            {
+                // 不可侵親の場合: Z-order可視性を考慮
+                var windowMgr = windowManager ?? WindowManager.Current;
+                var collider = boundaryCollider ??
+                    throw new InvalidOperationException("NoEntryBoundaryCollider required for NoEntry parent");
+
+                proposedBounds = CollisionFilter.ConstrainToVisibleParentBoundaries(
+                    window, proposedBounds, windowMgr, collider);
+            }
+            else
+            {
+                // 通常親の場合: 従来の制約（不可侵ウィンドウの場合は5pxバッファ付き）
+                proposedBounds = CollisionFilter.ConstrainToParentBounds(window, proposedBounds);
+            }
 
             Rectangle validBounds = ValidatePosition(window, proposedBounds);
 
@@ -828,8 +869,10 @@ namespace MultiWindowActionGame.Windows
             IInputService? inputService = null,
             IGameSettings? gameSettings = null,
             INoEntryZoneManager? noEntryZoneManager = null,
-            ICollisionService? collisionService = null)
-            : base(inputService, gameSettings, noEntryZoneManager, collisionService)
+            ICollisionService? collisionService = null,
+            IWindowManager? windowManager = null,
+            NoEntryBoundaryCollider? boundaryCollider = null)
+            : base(inputService, gameSettings, noEntryZoneManager, collisionService, windowManager, boundaryCollider)
         {
         }
 
@@ -877,8 +920,10 @@ namespace MultiWindowActionGame.Windows
             IInputService? inputService = null,
             IGameSettings? gameSettings = null,
             INoEntryZoneManager? noEntryZoneManager = null,
-            ICollisionService? collisionService = null)
-            : base(inputService, gameSettings, noEntryZoneManager, collisionService)
+            ICollisionService? collisionService = null,
+            IWindowManager? windowManager = null,
+            NoEntryBoundaryCollider? boundaryCollider = null)
+            : base(inputService, gameSettings, noEntryZoneManager, collisionService, windowManager, boundaryCollider)
         {
             minimizeEffect = new MinimizeEffect();
         }
@@ -952,8 +997,10 @@ namespace MultiWindowActionGame.Windows
             IInputService? inputService = null,
             IGameSettings? gameSettings = null,
             INoEntryZoneManager? noEntryZoneManager = null,
-            ICollisionService? collisionService = null)
-            : base(inputService, gameSettings, noEntryZoneManager, collisionService)
+            ICollisionService? collisionService = null,
+            IWindowManager? windowManager = null,
+            NoEntryBoundaryCollider? boundaryCollider = null)
+            : base(inputService, gameSettings, noEntryZoneManager, collisionService, windowManager, boundaryCollider)
         {
             displayText = text;
         }
@@ -985,8 +1032,10 @@ namespace MultiWindowActionGame.Windows
             IInputService? inputService = null,
             IGameSettings? gameSettings = null,
             INoEntryZoneManager? noEntryZoneManager = null,
-            ICollisionService? collisionService = null)
-            : base(inputService, gameSettings, noEntryZoneManager, collisionService)
+            ICollisionService? collisionService = null,
+            IWindowManager? windowManager = null,
+            NoEntryBoundaryCollider? boundaryCollider = null)
+            : base(inputService, gameSettings, noEntryZoneManager, collisionService, windowManager, boundaryCollider)
         {
         }
 
@@ -1010,8 +1059,10 @@ namespace MultiWindowActionGame.Windows
             IInputService? inputService = null,
             IGameSettings? gameSettings = null,
             INoEntryZoneManager? noEntryZoneManager = null,
-            ICollisionService? collisionService = null)
-            : base(inputService, gameSettings, noEntryZoneManager, collisionService)
+            ICollisionService? collisionService = null,
+            IWindowManager? windowManager = null,
+            NoEntryBoundaryCollider? boundaryCollider = null)
+            : base(inputService, gameSettings, noEntryZoneManager, collisionService, windowManager, boundaryCollider)
         {
         }
 
@@ -1034,8 +1085,10 @@ namespace MultiWindowActionGame.Windows
             IInputService? inputService = null,
             IGameSettings? gameSettings = null,
             INoEntryZoneManager? noEntryZoneManager = null,
-            ICollisionService? collisionService = null)
-            : base(inputService, gameSettings, noEntryZoneManager, collisionService)
+            ICollisionService? collisionService = null,
+            IWindowManager? windowManager = null,
+            NoEntryBoundaryCollider? boundaryCollider = null)
+            : base(inputService, gameSettings, noEntryZoneManager, collisionService, windowManager, boundaryCollider)
         {
         }
 
@@ -1058,8 +1111,10 @@ namespace MultiWindowActionGame.Windows
             IInputService? inputService = null,
             IGameSettings? gameSettings = null,
             INoEntryZoneManager? noEntryZoneManager = null,
-            ICollisionService? collisionService = null)
-            : base(inputService, gameSettings, noEntryZoneManager, collisionService)
+            ICollisionService? collisionService = null,
+            IWindowManager? windowManager = null,
+            NoEntryBoundaryCollider? boundaryCollider = null)
+            : base(inputService, gameSettings, noEntryZoneManager, collisionService, windowManager, boundaryCollider)
         {
         }
 

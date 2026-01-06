@@ -3,6 +3,8 @@ using System.Linq;
 using System.Windows.Forms;
 using MultiWindowActionGame.Windows;
 using MultiWindowActionGame.Collision;
+using MultiWindowActionGame.Interfaces;
+using MultiWindowActionGame.Managers;
 
 namespace MultiWindowActionGame.Services
 {
@@ -176,6 +178,209 @@ namespace MultiWindowActionGame.Services
                 Math.Min(proposedSize.Width, maxWidth),
                 Math.Min(proposedSize.Height, maxHeight)
             );
+        }
+
+        /// <summary>
+        /// 親が不可侵ウィンドウの場合、Z-order可視性を考慮して境界内に位置を制限
+        /// 見えている境界のみを制約として適用し、隠れている境界は無視
+        /// </summary>
+        /// <param name="window">対象ウィンドウ</param>
+        /// <param name="proposedBounds">提案された境界</param>
+        /// <param name="windowManager">ウィンドウマネージャー</param>
+        /// <param name="boundaryCollider">境界衝突判定</param>
+        /// <returns>制約適用後の境界</returns>
+        public static Rectangle ConstrainToVisibleParentBoundaries(
+            GameWindow window,
+            Rectangle proposedBounds,
+            IWindowManager windowManager,
+            NoEntryBoundaryCollider boundaryCollider)
+        {
+            if (window.Parent is not GameWindow parentWindow)
+            {
+                return proposedBounds;
+            }
+
+            // 親が不可侵ウィンドウでない場合は通常の制約
+            if (!parentWindow.IsNoEntryWindow)
+            {
+                return ConstrainToParentBounds(window, proposedBounds);
+            }
+
+            // 親が不可侵ウィンドウの場合: Z-order可視性を考慮
+
+            Rectangle parentBounds = parentWindow.CollisionBounds;
+            int bufferSize = window.IsNoEntryWindow ? PARENT_BOUNDARY_BUFFER : 0;
+
+            // 親の4辺の境界を取得
+            var boundaries = boundaryCollider.GetBoundaryRectangles(parentWindow);
+
+            // 各境界を位置で分類
+            Rectangle? topBoundary = null;
+            Rectangle? bottomBoundary = null;
+            Rectangle? leftBoundary = null;
+            Rectangle? rightBoundary = null;
+
+            foreach (var boundary in boundaries)
+            {
+                // 上辺判定: Y座標が親の上端付近
+                if (Math.Abs(boundary.Y - parentBounds.Y) < 3)
+                {
+                    topBoundary = boundary;
+                }
+                // 下辺判定: Y座標が親の下端付近
+                else if (Math.Abs(boundary.Bottom - parentBounds.Bottom) < 3)
+                {
+                    bottomBoundary = boundary;
+                }
+                // 左辺判定: X座標が親の左端付近
+                else if (Math.Abs(boundary.X - parentBounds.X) < 3)
+                {
+                    leftBoundary = boundary;
+                }
+                // 右辺判定: X座標が親の右端付近
+                else if (Math.Abs(boundary.Right - parentBounds.Right) < 3)
+                {
+                    rightBoundary = boundary;
+                }
+            }
+
+            // 各境界の可視性をチェック
+            bool topVisible = false;
+            bool bottomVisible = false;
+            bool leftVisible = false;
+            bool rightVisible = false;
+
+            if (topBoundary.HasValue)
+            {
+                topVisible = boundaryCollider.CheckCollision(parentWindow, topBoundary.Value, out _);
+            }
+            if (bottomBoundary.HasValue)
+            {
+                bottomVisible = boundaryCollider.CheckCollision(parentWindow, bottomBoundary.Value, out _);
+            }
+            if (leftBoundary.HasValue)
+            {
+                leftVisible = boundaryCollider.CheckCollision(parentWindow, leftBoundary.Value, out _);
+            }
+            if (rightBoundary.HasValue)
+            {
+                rightVisible = boundaryCollider.CheckCollision(parentWindow, rightBoundary.Value, out _);
+            }
+
+            // 見えている境界のみに対して制約を適用
+            int adjustedX = proposedBounds.X;
+            int adjustedY = proposedBounds.Y;
+
+            // 左境界が見えている場合のみ制約
+            if (leftVisible)
+            {
+                adjustedX = Math.Max(parentBounds.Left + bufferSize, adjustedX);
+            }
+
+            // 右境界が見えている場合のみ制約
+            if (rightVisible)
+            {
+                adjustedX = Math.Min(parentBounds.Right - bufferSize - proposedBounds.Width, adjustedX);
+            }
+
+            // 上境界が見えている場合のみ制約
+            if (topVisible)
+            {
+                adjustedY = Math.Max(parentBounds.Top + bufferSize, adjustedY);
+            }
+
+            // 下境界が見えている場合のみ制約
+            if (bottomVisible)
+            {
+                adjustedY = Math.Min(parentBounds.Bottom - bufferSize - proposedBounds.Height, adjustedY);
+            }
+
+            return new Rectangle(adjustedX, adjustedY, proposedBounds.Width, proposedBounds.Height);
+        }
+
+        /// <summary>
+        /// 親が不可侵ウィンドウの場合、Z-order可視性を考慮して境界内にサイズを制限
+        /// 見えている境界のみを制約として適用し、隠れている境界は無視
+        /// </summary>
+        /// <param name="window">対象ウィンドウ</param>
+        /// <param name="proposedSize">提案されたサイズ</param>
+        /// <param name="windowManager">ウィンドウマネージャー</param>
+        /// <param name="boundaryCollider">境界衝突判定</param>
+        /// <returns>制約適用後のサイズ</returns>
+        public static Size ConstrainSizeToVisibleParentBoundaries(
+            GameWindow window,
+            Size proposedSize,
+            IWindowManager windowManager,
+            NoEntryBoundaryCollider boundaryCollider)
+        {
+            if (window.Parent is not GameWindow parentWindow)
+            {
+                return proposedSize;
+            }
+
+            // 親が不可侵ウィンドウでない場合は通常の制約
+            if (!parentWindow.IsNoEntryWindow)
+            {
+                return ConstrainSizeToParentBounds(window, proposedSize);
+            }
+
+            // 親が不可侵ウィンドウの場合: Z-order可視性を考慮
+
+            Rectangle parentBounds = parentWindow.CollisionBounds;
+            Rectangle windowBounds = window.CollisionBounds;
+            int bufferSize = window.IsNoEntryWindow ? PARENT_BOUNDARY_BUFFER : 0;
+
+            // 親の4辺の境界を取得
+            var boundaries = boundaryCollider.GetBoundaryRectangles(parentWindow);
+
+            // 右辺・下辺のみをチェック（サイズ制約は拡大方向のみ）
+            Rectangle? rightBoundary = null;
+            Rectangle? bottomBoundary = null;
+
+            foreach (var boundary in boundaries)
+            {
+                // 右辺判定: X座標が親の右端付近
+                if (Math.Abs(boundary.Right - parentBounds.Right) < 3)
+                {
+                    rightBoundary = boundary;
+                }
+                // 下辺判定: Y座標が親の下端付近
+                else if (Math.Abs(boundary.Bottom - parentBounds.Bottom) < 3)
+                {
+                    bottomBoundary = boundary;
+                }
+            }
+
+            // 各境界の可視性をチェック
+            bool rightVisible = false;
+            bool bottomVisible = false;
+
+            if (rightBoundary.HasValue)
+            {
+                rightVisible = boundaryCollider.CheckCollision(parentWindow, rightBoundary.Value, out _);
+            }
+            if (bottomBoundary.HasValue)
+            {
+                bottomVisible = boundaryCollider.CheckCollision(parentWindow, bottomBoundary.Value, out _);
+            }
+
+            // 見えている境界のみに対して制約を適用
+            int maxWidth = proposedSize.Width;
+            int maxHeight = proposedSize.Height;
+
+            // 右境界が見えている場合のみ幅を制約
+            if (rightVisible)
+            {
+                maxWidth = Math.Min(maxWidth, parentBounds.Right - bufferSize - windowBounds.Left);
+            }
+
+            // 下境界が見えている場合のみ高さを制約
+            if (bottomVisible)
+            {
+                maxHeight = Math.Min(maxHeight, parentBounds.Bottom - bufferSize - windowBounds.Top);
+            }
+
+            return new Size(maxWidth, maxHeight);
         }
     }
 }

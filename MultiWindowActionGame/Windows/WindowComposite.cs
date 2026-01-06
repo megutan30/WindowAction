@@ -61,6 +61,7 @@ namespace MultiWindowActionGame.Windows
 
         protected IEnumerable<IEffectTarget> GetDirectChildren(IEffectTarget parent)
         {
+            // ToList()でスナップショットを取得して、列挙中のコレクション変更エラーを防ぐ
             return parent.Children.Where(child =>
             {
                 if (child is GameWindow childWindow)
@@ -68,7 +69,7 @@ namespace MultiWindowActionGame.Windows
                     return childWindow.Parent == parent;
                 }
                 return true;
-            });
+            }).ToList();
         }
     }
     public class MovementEffect : BaseWindowEffect
