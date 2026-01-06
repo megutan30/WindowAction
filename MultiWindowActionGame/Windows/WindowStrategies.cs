@@ -282,7 +282,6 @@ namespace MultiWindowActionGame.Windows
                 newSize
             );
 
-            // CollisionService or fallback to ZoneManager
             bool hasCollision = CheckCollision(window, proposedBounds);
 
             // Z-order + Region考慮の不可侵ウィンドウ境界判定を含む（自分自身を除外）
@@ -443,23 +442,6 @@ namespace MultiWindowActionGame.Windows
                 Math.Max(settings.MinimumSize.Height,
                     Math.Min(windowMaxSize.Height, originalSize.Height + dy))
             );
-
-            // 親がある場合、親の境界内にサイズを制限
-            if (window.Parent is GameWindow parentWindow && parentWindow.IsNoEntryWindow)
-            {
-                // 不可侵親の場合: Z-order可視性を考慮
-                var windowMgr = windowManager ?? WindowManager.Current;
-                var collider = boundaryCollider ??
-                    throw new InvalidOperationException("NoEntryBoundaryCollider required for NoEntry parent");
-
-                proposedSize = CollisionFilter.ConstrainSizeToVisibleParentBoundaries(
-                    window, proposedSize, windowMgr, collider);
-            }
-            else
-            {
-                // 通常親の場合: 従来の制約（不可侵ウィンドウの場合は5pxバッファ付き）
-                proposedSize = CollisionFilter.ConstrainSizeToParentBounds(window, proposedSize);
-            }
 
             // 境界チェックの強化（不可侵領域との衝突チェック）
             Size validSize = ValidateSize(window, proposedSize);
@@ -736,23 +718,6 @@ namespace MultiWindowActionGame.Windows
                 window.CollisionBounds.Width,
                 window.CollisionBounds.Height
             );
-
-            // 親がある場合、親の境界内に制限
-            if (window.Parent is GameWindow parentWindow && parentWindow.IsNoEntryWindow)
-            {
-                // 不可侵親の場合: Z-order可視性を考慮
-                var windowMgr = windowManager ?? WindowManager.Current;
-                var collider = boundaryCollider ??
-                    throw new InvalidOperationException("NoEntryBoundaryCollider required for NoEntry parent");
-
-                proposedBounds = CollisionFilter.ConstrainToVisibleParentBoundaries(
-                    window, proposedBounds, windowMgr, collider);
-            }
-            else
-            {
-                // 通常親の場合: 従来の制約（不可侵ウィンドウの場合は5pxバッファ付き）
-                proposedBounds = CollisionFilter.ConstrainToParentBounds(window, proposedBounds);
-            }
 
             Rectangle validBounds = ValidatePosition(window, proposedBounds);
 
