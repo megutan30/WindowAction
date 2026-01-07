@@ -97,6 +97,7 @@ namespace MultiWindowActionGame.Core
 
                 ToTitaleButtonPosition = new Point(106, 113),
                 RetryButtonPosition = new Point(369, 113),
+                EnableDesktopIcons = true,
             });
 
             // ステージデータの初期化
@@ -898,6 +899,16 @@ namespace MultiWindowActionGame.Core
             }
             return stages[stageNumber];
         }
+
+        public StageData? GetCurrentStage()
+        {
+            if (currentStage < 0 || currentStage >= stages.Count)
+            {
+                return null;
+            }
+            return stages[currentStage];
+        }
+
         public bool CheckGoal(PlayerForm player)
         {
             if (currentGoal == null || currentGoal.IsMinimized) return false;
@@ -1030,5 +1041,6 @@ namespace MultiWindowActionGame.Core
         public Point? ExitButtonPosition { get; set; }
         public Point? ToTitaleButtonPosition { get; set; }
         public bool IsTitleStage { get; set; }
+        public bool EnableDesktopIcons { get; set; } = false;
     }
 }

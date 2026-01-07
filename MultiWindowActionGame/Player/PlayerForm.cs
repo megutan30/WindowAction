@@ -27,6 +27,7 @@ namespace MultiWindowActionGame.Player
         private readonly IPlayerPhysics? physics;
         private IPlayerWindowInteraction? windowInteraction;
         private readonly IPlayerStateMachine? stateMachine;
+        private readonly IStageManager? stageManager;  // Fallbackパターン用（null許容）
 
         // アニメーションシステム
         private PlayerAnimation animation = new PlayerAnimation();
@@ -72,7 +73,8 @@ namespace MultiWindowActionGame.Player
             IPlayerInputHandler? inputHandler = null,
             IPlayerPhysics? physics = null,
             IPlayerWindowInteraction? windowInteraction = null,
-            IPlayerStateMachine? stateMachine = null)
+            IPlayerStateMachine? stateMachine = null,
+            IStageManager? stageManager = null)
         {
             this.gameSettings = gameSettings;
             this.windowManager = windowManager;
@@ -81,6 +83,7 @@ namespace MultiWindowActionGame.Player
             this.physics = physics;
             this.windowInteraction = windowInteraction;
             this.stateMachine = stateMachine;
+            this.stageManager = stageManager;  // null許容（Fallback: StageManager.Current）
 
             var gameSettingsSafe = (gameSettings ?? GameSettings.Current);
             settings = gameSettingsSafe.Player;
@@ -388,9 +391,12 @@ namespace MultiWindowActionGame.Player
             // ボタンとの衝突判定（ウィンドウ内外に関係なく実行）
             proposedCollision = HandleButtonCollisions(proposedCollision);
 
-            // デスクトップアイコンとの衝突判定（一時的に無効化）
-            // TODO: デスクトップアイコン判定を再有効化する場合はコメントを外す
-            // proposedCollision = HandleDesktopIconCollisions(proposedCollision);
+            // デスクトップアイコンとの衝突判定（ステージ別制御）
+            var currentStage = stageManager?.GetCurrentStage() ?? StageManager.Current.GetCurrentStage();
+            if (currentStage?.EnableDesktopIcons == true)
+            {
+                proposedCollision = HandleDesktopIconCollisions(proposedCollision);
+            }
 
             // ウィンドウ遷移処理
             windowInteraction.HandleWindowTransitions(proposedCollision, collisionBounds);

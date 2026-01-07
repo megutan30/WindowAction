@@ -18,6 +18,7 @@ namespace MultiWindowActionGame.Player
         private readonly IWindowManager windowManager;
         private readonly INoEntryZoneManager noEntryZoneManager;
         private readonly IInputService inputService;
+        private readonly IStageManager? stageManager;  // Fallbackパターン用（null許容）
 
         private float verticalVelocity = 0;
         private bool isGrounded = false;
@@ -29,12 +30,14 @@ namespace MultiWindowActionGame.Player
             IGameSettings gameSettings,
             IWindowManager windowManager,
             INoEntryZoneManager noEntryZoneManager,
-            IInputService inputService)
+            IInputService inputService,
+            IStageManager? stageManager = null)
         {
             this.settings = gameSettings?.Player ?? throw new ArgumentNullException(nameof(gameSettings));
             this.windowManager = windowManager ?? throw new ArgumentNullException(nameof(windowManager));
             this.noEntryZoneManager = noEntryZoneManager ?? throw new ArgumentNullException(nameof(noEntryZoneManager));
             this.inputService = inputService ?? throw new ArgumentNullException(nameof(inputService));
+            this.stageManager = stageManager;  // null許容（Fallback: StageManager.Current）
         }
 
         public Vector2 CalculateMovement(float deltaTime)
@@ -160,40 +163,41 @@ namespace MultiWindowActionGame.Player
                 }
             }
 
-            // デスクトップアイコンとの地面判定（一時的に無効化）
-            // TODO: デスクトップアイコン判定を再有効化する場合はコメントを外す
-            /*
-            try
+            // デスクトップアイコンとの地面判定（ステージ別制御）
+            var currentStage = stageManager?.GetCurrentStage() ?? StageManager.Current.GetCurrentStage();
+            if (currentStage?.EnableDesktopIcons == true)
             {
-                var desktopIcons = DesktopIconHelper.Instance?.GetDesktopIcons();
-                if (desktopIcons != null && desktopIcons.Count > 0)
+                try
                 {
-                    // 足元の範囲と交差するアイコンのみを処理
-                    var nearbyIcons = desktopIcons.Where(icon =>
-                        icon.Bounds.IntersectsWith(currentFeetBounds) &&
-                        bounds.Bottom >= icon.Bounds.Top &&
-                        bounds.Bottom <= icon.Bounds.Top + 5 &&
-                        bounds.Right > icon.Bounds.Left &&
-                        bounds.Left < icon.Bounds.Right
-                    ).Take(5).ToList();
-
-                    foreach (var icon in nearbyIcons)
+                    var desktopIcons = DesktopIconHelper.Instance?.GetDesktopIcons();
+                    if (desktopIcons != null && desktopIcons.Count > 0)
                     {
-                        // アイコンがウィンドウに隠れていないかチェック
-                        if (IsIconVisibleAtPosition(icon, currentFeetBounds))
+                        // 足元の範囲と交差するアイコンのみを処理
+                        var nearbyIcons = desktopIcons.Where(icon =>
+                            icon.Bounds.IntersectsWith(currentFeetBounds) &&
+                            bounds.Bottom >= icon.Bounds.Top &&
+                            bounds.Bottom <= icon.Bounds.Top + 5 &&
+                            bounds.Right > icon.Bounds.Left &&
+                            bounds.Left < icon.Bounds.Right
+                        ).Take(5).ToList();
+
+                        foreach (var icon in nearbyIcons)
                         {
-                            SetGrounded(true, icon.Bounds.Top);
-                            OnGrounded?.Invoke(icon.Bounds.Top);
-                            return;
+                            // アイコンがウィンドウに隠れていないかチェック
+                            if (IsIconVisibleAtPosition(icon, currentFeetBounds))
+                            {
+                                SetGrounded(true, icon.Bounds.Top);
+                                OnGrounded?.Invoke(icon.Bounds.Top);
+                                return;
+                            }
                         }
                     }
                 }
+                catch (Exception)
+                {
+                    // エラーが発生してもゲームを続行
+                }
             }
-            catch (Exception)
-            {
-                // エラーが発生してもゲームを続行
-            }
-            */
 
             var intersectingWindows = windowManager.GetIntersectingWindows(sweepBounds)
                 .OrderByDescending(w => windowManager.GetWindowZIndex(w));

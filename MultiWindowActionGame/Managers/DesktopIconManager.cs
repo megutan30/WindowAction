@@ -54,6 +54,9 @@ namespace MultiWindowActionGame.Managers
         private Task? refreshTask = null;
         private readonly CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
 
+        // Shell通知受信用ウィンドウ
+        private HiddenForm? messageWindow;
+
         // Win32 API定数
         private const int LVM_FIRST = 0x1000;
         private const int LVM_GETITEMCOUNT = LVM_FIRST + 4;
@@ -266,6 +269,14 @@ namespace MultiWindowActionGame.Managers
             this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
             this.errorHandler = errorHandler ?? throw new ArgumentNullException(nameof(errorHandler));
 
+            // メッセージ受信用の非表示ウィンドウ作成
+            messageWindow = new HiddenForm();
+            messageWindow.OnShellNotify += () =>
+            {
+                // Shell通知受信時に非同期でRefresh
+                Task.Run(() => RefreshIconsAsync());
+            };
+
             // 変更監視を開始
             if (useChangeNotification)
             {
@@ -280,25 +291,50 @@ namespace MultiWindowActionGame.Managers
         {
             try
             {
+                if (messageWindow == null)
+                {
+                    logger.LogError("Message window not initialized");
+                    useChangeNotification = false;
+                    return;
+                }
+
                 // デスクトップフォルダのPIDLを取得
                 var desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
                 logger.LogInfo($"Initializing desktop change notification for: {desktopPath}");
 
-                // 監視対象を設定（デスクトップフォルダ）
+                // ウィンドウハンドルを作成（メッセージを受信可能にする）
+                var handle = messageWindow.Handle;
+
+                // 監視するイベントマスク
+                uint eventMask = SHCNE_CREATE | SHCNE_DELETE | SHCNE_RENAMEITEM |
+                                SHCNE_UPDATEITEM | SHCNE_UPDATEDIR;
+
+                // 監視対象を設定（デスクトップ全体）
                 var entry = new SHChangeNotifyEntry
                 {
-                    pidl = IntPtr.Zero, // デスクトップ全体を監視
+                    pidl = IntPtr.Zero,  // デスクトップ全体を監視
                     fRecursive = false
                 };
 
-                // 監視するイベントマスク（将来の実装用）
-                // uint eventMask = SHCNE_CREATE | SHCNE_DELETE | SHCNE_RENAMEITEM | 
-                //                SHCNE_UPDATEITEM | SHCNE_UPDATEDIR;
+                // Shell通知を登録
+                changeNotifyId = SHChangeNotifyRegister(
+                    handle,
+                    SHCNRF_ShellLevel | SHCNRF_InterruptLevel,
+                    eventMask,
+                    WM_SHNOTIFY,
+                    1,
+                    ref entry
+                );
 
-                // 監視を登録（実際のウィンドウハンドルが必要なため、後で実装）
-                // changeNotifyId = SHChangeNotifyRegister(windowHandle, SHCNRF_ShellLevel, eventMask, WM_SHNOTIFY, 1, ref entry);
-
-                logger.LogInfo("Desktop change notification initialized successfully");
+                if (changeNotifyId == 0)
+                {
+                    logger.LogError("Failed to register shell notification");
+                    useChangeNotification = false;
+                }
+                else
+                {
+                    logger.LogInfo($"Desktop change notification initialized successfully (ID: {changeNotifyId})");
+                }
             }
             catch (Exception ex)
             {
@@ -738,6 +774,13 @@ namespace MultiWindowActionGame.Managers
 
                 // 変更監視を停止
                 StopChangeNotification();
+
+                // メッセージウィンドウの破棄
+                if (messageWindow != null)
+                {
+                    messageWindow.Dispose();
+                    messageWindow = null;
+                }
 
                 // リソース解放
                 cancellationTokenSource.Dispose();
@@ -1520,6 +1563,42 @@ namespace MultiWindowActionGame.Managers
                 result.Append(c);
             }
             return result.ToString();
+        }
+
+        /// <summary>
+        /// Shell通知を受信するための非表示ウィンドウ
+        /// </summary>
+        private class HiddenForm : Form
+        {
+            public event Action? OnShellNotify;
+            private const uint WM_SHNOTIFY = 0x0401;
+
+            public HiddenForm()
+            {
+                // 非表示フォームとして初期化
+                this.ShowInTaskbar = false;
+                this.FormBorderStyle = FormBorderStyle.None;
+                this.StartPosition = FormStartPosition.Manual;
+                this.Location = new Point(-32000, -32000);
+                this.Size = new Size(1, 1);
+                this.Opacity = 0;
+            }
+
+            protected override void WndProc(ref Message m)
+            {
+                if (m.Msg == WM_SHNOTIFY)
+                {
+                    // Shell通知受信
+                    OnShellNotify?.Invoke();
+                }
+                base.WndProc(ref m);
+            }
+
+            protected override void SetVisibleCore(bool value)
+            {
+                // 常に非表示
+                base.SetVisibleCore(false);
+            }
         }
     }
 }
