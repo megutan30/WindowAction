@@ -505,7 +505,11 @@ namespace MultiWindowActionGame.Player
                     }
                     else if (collisionBounds.Top >= iconBounds.Bottom && adjustedCollision.Top < iconBounds.Bottom)
                     {
+                        // デスクトップアイコンの底面に衝突（下からジャンプしてぶつかった）
                         adjustedCollision.Y = iconBounds.Bottom;
+                        // 垂直速度をゼロにして、すぐに降下させる
+                        physics?.SetVerticalVelocity(0);
+                        animation.ResetScale();
                     }
                     else if (collisionBounds.Right <= iconBounds.Left && adjustedCollision.Right > iconBounds.Left)
                     {
