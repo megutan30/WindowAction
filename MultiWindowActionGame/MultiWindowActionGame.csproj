@@ -29,11 +29,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="config\settings.json">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
-      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
-    </None>
+    <EmbeddedResource Include="config\settings.json" />
   </ItemGroup>
 
 </Project>
