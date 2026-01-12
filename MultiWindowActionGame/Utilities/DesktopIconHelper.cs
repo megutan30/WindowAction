@@ -26,7 +26,8 @@ namespace MultiWindowActionGame.Utilities
             {
                 try
                 {
-                    // ログディレクトリを作成
+#if DEBUG
+                    // Debug構成: ログディレクトリを作成
                     var logDir = Path.Combine(Directory.GetCurrentDirectory(), "logs");
                     if (!Directory.Exists(logDir))
                     {
@@ -36,10 +37,14 @@ namespace MultiWindowActionGame.Utilities
                     // 簡易ロガーとエラーハンドラーを作成
                     var logPath = Path.Combine(logDir, "desktop_icons.log");
                     var logger = new FileLogger(logPath);
+#else
+                    // Release構成: NullLoggerを使用
+                    var logger = new NullLogger();
+#endif
                     var errorHandler = new ErrorHandler(logger);
                     _current = new DesktopIconManager(logger, errorHandler);
 
-                    // 即座にアイコンを取得してログに記録
+                    // 即座にアイコンを取得（ログ記録なし）
                     _current.RefreshIcons();
                 }
                 catch
