@@ -5,6 +5,7 @@ using System.Windows.Forms;
 using MultiWindowActionGame.Collision;
 using MultiWindowActionGame.Interfaces;
 using MultiWindowActionGame.Managers;
+using MultiWindowActionGame.Player;
 using MultiWindowActionGame.Windows;
 
 namespace MultiWindowActionGame.Services
@@ -19,45 +20,22 @@ namespace MultiWindowActionGame.Services
         private readonly NoEntryBoundaryCollider boundaryCollider;
         private readonly ZOrderCollisionHelper zOrderHelper;
         private readonly IWindowManager windowManager;
+        private readonly ZOrderVisibilityService visibilityService; 
 
         public CollisionValidator(
             INoEntryZoneManager noEntryZoneManager,
             NoEntryBoundaryCollider boundaryCollider,
             ZOrderCollisionHelper zOrderHelper,
-            IWindowManager windowManager)
+            IWindowManager windowManager,
+            ZOrderVisibilityService visibilityService)
         {
             this.noEntryZoneManager = noEntryZoneManager ?? throw new ArgumentNullException(nameof(noEntryZoneManager));
             this.boundaryCollider = boundaryCollider ?? throw new ArgumentNullException(nameof(boundaryCollider));
             this.zOrderHelper = zOrderHelper ?? throw new ArgumentNullException(nameof(zOrderHelper));
             this.windowManager = windowManager ?? throw new ArgumentNullException(nameof(windowManager));
+            this.visibilityService = visibilityService ?? throw new ArgumentNullException(nameof(visibilityService));
         }
 
-        /// <summary>
-        /// Sweep Boundsを作成（現在位置から目標位置までの移動経路全体をカバー）
-        /// </summary>
-        private Rectangle CreateSweepBounds(Rectangle currentBounds, Rectangle proposedBounds, bool xAxisOnly, bool yAxisOnly)
-        {
-            int minX = Math.Min(currentBounds.X, proposedBounds.X);
-            int maxX = Math.Max(currentBounds.Right, proposedBounds.Right);
-            int minY = Math.Min(currentBounds.Y, proposedBounds.Y);
-            int maxY = Math.Max(currentBounds.Bottom, proposedBounds.Bottom);
-
-            // X軸のみの場合、Y座標は現在位置を使用
-            if (xAxisOnly)
-            {
-                return new Rectangle(minX, currentBounds.Y, maxX - minX, currentBounds.Height);
-            }
-            // Y軸のみの場合、X座標は現在位置または調整後のX位置を使用
-            else if (yAxisOnly)
-            {
-                return new Rectangle(proposedBounds.X, minY, proposedBounds.Width, maxY - minY);
-            }
-            // 両軸の場合
-            else
-            {
-                return new Rectangle(minX, minY, maxX - minX, maxY - minY);
-            }
-        }
 
         /// <summary>
         /// 移動可能な位置に調整した境界を返す（Sweep方式で移動経路全体をチェック）
@@ -78,11 +56,9 @@ namespace MultiWindowActionGame.Services
                 foreach (var zone in noEntryZoneManager.Zones)
                 {
                     // X軸方向の移動をチェック（移動経路全体をSweep）
-                    Rectangle xMovement = CreateSweepBounds(
-                        new Rectangle(currentBounds.X, currentBounds.Y, currentBounds.Width, currentBounds.Height),
-                        new Rectangle(proposedBounds.X, currentBounds.Y, proposedBounds.Width, currentBounds.Height),
-                        xAxisOnly: true,
-                        yAxisOnly: false
+                    Rectangle xMovement = SweepBoundsHelper.CreateSweepBoundsXAxis(
+                        currentBounds,
+                        new Rectangle(proposedBounds.X, currentBounds.Y, proposedBounds.Width, currentBounds.Height)
                     );
 
                     if (xMovement.IntersectsWith(zone.Bounds))
@@ -110,11 +86,9 @@ namespace MultiWindowActionGame.Services
 
                     // Y軸方向の移動をチェック（移動経路全体をSweep）
                     int adjustedX = bestAdjustedX ?? proposedBounds.X;
-                    Rectangle yMovement = CreateSweepBounds(
+                    Rectangle yMovement = SweepBoundsHelper.CreateSweepBoundsYAxis(
                         new Rectangle(adjustedX, currentBounds.Y, proposedBounds.Width, currentBounds.Height),
-                        new Rectangle(adjustedX, proposedBounds.Y, proposedBounds.Width, proposedBounds.Height),
-                        xAxisOnly: false,
-                        yAxisOnly: true
+                        new Rectangle(adjustedX, proposedBounds.Y, proposedBounds.Width, proposedBounds.Height)
                     );
 
                     if (yMovement.IntersectsWith(zone.Bounds))
@@ -147,11 +121,9 @@ namespace MultiWindowActionGame.Services
             {
                 // Y軸方向の移動をチェック（移動経路全体をSweep）
                 int adjustedXForBoundary = bestAdjustedX ?? proposedBounds.X;
-                Rectangle yMovement = CreateSweepBounds(
+                Rectangle yMovement = SweepBoundsHelper.CreateSweepBoundsYAxis(
                     new Rectangle(adjustedXForBoundary, currentBounds.Y, proposedBounds.Width, currentBounds.Height),
-                    new Rectangle(adjustedXForBoundary, proposedBounds.Y, proposedBounds.Width, proposedBounds.Height),
-                    xAxisOnly: false,
-                    yAxisOnly: true
+                    new Rectangle(adjustedXForBoundary, proposedBounds.Y, proposedBounds.Width, proposedBounds.Height)
                 );
 
                 // CheckAnyCollisionを使用（ExcludeChildren対応）
@@ -184,11 +156,9 @@ namespace MultiWindowActionGame.Services
                 }
 
                 // X軸方向の移動をチェック（移動経路全体をSweep）
-                Rectangle xMovement = CreateSweepBounds(
-                    new Rectangle(currentBounds.X, currentBounds.Y, currentBounds.Width, currentBounds.Height),
-                    new Rectangle(proposedBounds.X, currentBounds.Y, proposedBounds.Width, currentBounds.Height),
-                    xAxisOnly: true,
-                    yAxisOnly: false
+                Rectangle xMovement = SweepBoundsHelper.CreateSweepBoundsXAxis(
+                    currentBounds,
+                    new Rectangle(proposedBounds.X, currentBounds.Y, proposedBounds.Width, currentBounds.Height)
                 );
 
                 // CheckAnyCollisionを使用（ExcludeChildren対応）
@@ -238,15 +208,18 @@ namespace MultiWindowActionGame.Services
                     Rectangle windowBounds = window.CollisionBounds;
 
                     // X軸方向の移動をチェック（移動経路全体をSweep）
-                    Rectangle xMovement = CreateSweepBounds(
-                        new Rectangle(currentBounds.X, currentBounds.Y, currentBounds.Width, currentBounds.Height),
-                        new Rectangle(proposedBounds.X, currentBounds.Y, proposedBounds.Width, currentBounds.Height),
-                        xAxisOnly: true,
-                        yAxisOnly: false
+                    Rectangle xMovement = SweepBoundsHelper.CreateSweepBoundsXAxis(
+                        currentBounds,
+                        new Rectangle(proposedBounds.X, currentBounds.Y, proposedBounds.Width, currentBounds.Height)
                     );
-
                     if (xMovement.IntersectsWith(windowBounds))
                     {
+                        // Z-order可視性判定を追加
+                        if (options.UseZOrderFiltering &&
+                            !visibilityService.IsWindowVisibleFromNoEntry(window, xMovement, options.ExcludeWindow))
+                        {
+                            continue;  // 隠れているウィンドウはスキップ
+                        }
                         int candidateX;
                         if (currentBounds.X + currentBounds.Width <= windowBounds.X)
                         {
@@ -270,15 +243,19 @@ namespace MultiWindowActionGame.Services
 
                     // Y軸方向の移動をチェック（移動経路全体をSweep）
                     int adjustedXForNormalWindow = bestAdjustedX ?? proposedBounds.X;
-                    Rectangle yMovement = CreateSweepBounds(
+                    Rectangle yMovement = SweepBoundsHelper.CreateSweepBoundsYAxis(
                         new Rectangle(adjustedXForNormalWindow, currentBounds.Y, proposedBounds.Width, currentBounds.Height),
-                        new Rectangle(adjustedXForNormalWindow, proposedBounds.Y, proposedBounds.Width, proposedBounds.Height),
-                        xAxisOnly: false,
-                        yAxisOnly: true
+                        new Rectangle(adjustedXForNormalWindow, proposedBounds.Y, proposedBounds.Width, proposedBounds.Height)
                     );
 
                     if (yMovement.IntersectsWith(windowBounds))
                     {
+                        // Z-order可視性判定を追加
+                        if (options.UseZOrderFiltering &&
+                            !visibilityService.IsWindowVisibleFromNoEntry(window, yMovement, options.ExcludeWindow))
+                        {
+                            continue;  // 隠れているウィンドウはスキップ
+                        }
                         int candidateY;
                         if (currentBounds.Y + currentBounds.Height <= windowBounds.Y)
                         {
@@ -315,11 +292,9 @@ namespace MultiWindowActionGame.Services
                     Rectangle buttonBounds = button.Bounds;
 
                     // X軸方向の移動をチェック（移動経路全体をSweep）
-                    Rectangle xMovement = CreateSweepBounds(
-                        new Rectangle(currentBounds.X, currentBounds.Y, currentBounds.Width, currentBounds.Height),
-                        new Rectangle(proposedBounds.X, currentBounds.Y, proposedBounds.Width, currentBounds.Height),
-                        xAxisOnly: true,
-                        yAxisOnly: false
+                    Rectangle xMovement = SweepBoundsHelper.CreateSweepBoundsXAxis(
+                        currentBounds,
+                        new Rectangle(proposedBounds.X, currentBounds.Y, proposedBounds.Width, currentBounds.Height)
                     );
 
                     if (xMovement.IntersectsWith(buttonBounds))
@@ -347,11 +322,9 @@ namespace MultiWindowActionGame.Services
 
                     // Y軸方向の移動をチェック（移動経路全体をSweep）
                     int adjustedXForButton = bestAdjustedX ?? proposedBounds.X;
-                    Rectangle yMovement = CreateSweepBounds(
+                    Rectangle yMovement = SweepBoundsHelper.CreateSweepBoundsYAxis(
                         new Rectangle(adjustedXForButton, currentBounds.Y, proposedBounds.Width, currentBounds.Height),
-                        new Rectangle(adjustedXForButton, proposedBounds.Y, proposedBounds.Width, proposedBounds.Height),
-                        xAxisOnly: false,
-                        yAxisOnly: true
+                        new Rectangle(adjustedXForButton, proposedBounds.Y, proposedBounds.Width, proposedBounds.Height)
                     );
 
                     if (yMovement.IntersectsWith(buttonBounds))
@@ -374,6 +347,90 @@ namespace MultiWindowActionGame.Services
                             Math.Abs(candidateY - currentBounds.Y) < Math.Abs(bestAdjustedY.Value - currentBounds.Y))
                         {
                             bestAdjustedY = candidateY;
+                        }
+                    }
+                }
+            }
+
+            // プレイヤーとの衝突判定（不可侵ウィンドウが移動する場合）
+            if (options.CheckPlayer)
+            {
+                var player = windowManager.GetPlayer();
+                if (player != null && options.ExcludeWindow != null)
+                {
+                    Rectangle playerBounds = player.CollisionBounds;
+
+                    // プレイヤーがウィンドウの子孫の場合はスキップ（親が子を押すことを防止）
+                    if (!IsPlayerDescendantOfWindow(player, options.ExcludeWindow))
+                    {
+                        // X軸方向の移動をチェック
+                        Rectangle xMovement = new Rectangle(
+                            proposedBounds.X,
+                            currentBounds.Y,
+                            proposedBounds.Width,
+                            currentBounds.Height
+                        );
+
+                        if (xMovement.IntersectsWith(playerBounds))
+                        {
+                            int candidateX;
+
+                            if (currentBounds.Right <= playerBounds.Left)
+                            {
+                                // 左から右への移動 → プレイヤーの左端で停止
+                                candidateX = playerBounds.Left - proposedBounds.Width;
+                            }
+                            else if (currentBounds.Left >= playerBounds.Right)
+                            {
+                                // 右から左への移動 → プレイヤーの右端で停止
+                                candidateX = playerBounds.Right;
+                            }
+                            else
+                            {
+                                // 既に重なっている → 現在位置を維持
+                                candidateX = currentBounds.X;
+                            }
+
+                            if (!bestAdjustedX.HasValue ||
+                                Math.Abs(candidateX - currentBounds.X) < Math.Abs(bestAdjustedX.Value - currentBounds.X))
+                            {
+                                bestAdjustedX = candidateX;
+                            }
+                        }
+
+                        // Y軸方向の移動をチェック（X軸調整後の位置を使用）
+                        Rectangle yMovement = new Rectangle(
+                            bestAdjustedX ?? proposedBounds.X,
+                            proposedBounds.Y,
+                            proposedBounds.Width,
+                            proposedBounds.Height
+                        );
+
+                        if (yMovement.IntersectsWith(playerBounds))
+                        {
+                            int candidateY;
+
+                            if (currentBounds.Bottom <= playerBounds.Top)
+                            {
+                                // 上から下への移動 → プレイヤーの上端で停止
+                                candidateY = playerBounds.Top - proposedBounds.Height;
+                            }
+                            else if (currentBounds.Top >= playerBounds.Bottom)
+                            {
+                                // 下から上への移動 → プレイヤーの下端で停止
+                                candidateY = playerBounds.Bottom;
+                            }
+                            else
+                            {
+                                // 既に重なっている → 現在位置を維持
+                                candidateY = currentBounds.Y;
+                            }
+
+                            if (!bestAdjustedY.HasValue ||
+                                Math.Abs(candidateY - currentBounds.Y) < Math.Abs(bestAdjustedY.Value - currentBounds.Y))
+                            {
+                                bestAdjustedY = candidateY;
+                            }
                         }
                     }
                 }
@@ -550,6 +607,12 @@ namespace MultiWindowActionGame.Services
 
                         if (xResize.IntersectsWith(window.CollisionBounds))
                         {
+                            // Z-order可視性判定を追加
+                            if (options.UseZOrderFiltering &&
+                                !visibilityService.IsWindowVisibleFromNoEntry(window, xResize, options.ExcludeWindow))
+                            {
+                                continue;  // 隠れているウィンドウはスキップ
+                            }
                             // 左から右に拡大している場合
                             if (currentBounds.X < window.CollisionBounds.X)
                             {
@@ -577,6 +640,12 @@ namespace MultiWindowActionGame.Services
 
                         if (yResize.IntersectsWith(window.CollisionBounds))
                         {
+                            // Z-order可視性判定を追加
+                            if (options.UseZOrderFiltering &&
+                                !visibilityService.IsWindowVisibleFromNoEntry(window, yResize, options.ExcludeWindow))
+                            {
+                                continue;  // 隠れているウィンドウはスキップ
+                            }
                             // 上から下に拡大している場合
                             if (currentBounds.Y < window.CollisionBounds.Y)
                             {
@@ -584,6 +653,73 @@ namespace MultiWindowActionGame.Services
                                 if (!minHeight.HasValue || candidateHeight < minHeight.Value)
                                 {
                                     minHeight = candidateHeight;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // プレイヤーとの衝突判定（不可侵ウィンドウがリサイズする場合、拡大方向のみ）
+            if (options.CheckPlayer)
+            {
+                var player = windowManager.GetPlayer();
+                if (player != null && options.ExcludeWindow != null)
+                {
+                    Rectangle playerBounds = player.CollisionBounds;
+
+                    // プレイヤーがウィンドウの子孫の場合はスキップ（親が子を押すことを防止）
+                    if (!IsPlayerDescendantOfWindow(player, options.ExcludeWindow))
+                    {
+                        // X方向の拡大をチェック
+                        if (isGrowingWidth)
+                        {
+                            Rectangle xResize = new Rectangle(
+                                currentBounds.X,
+                                currentBounds.Y,
+                                proposedSize.Width,
+                                currentBounds.Height
+                            );
+
+                            if (xResize.IntersectsWith(playerBounds))
+                            {
+                                // 左から右に拡大している場合
+                                if (currentBounds.X < playerBounds.X)
+                                {
+                                    int candidateWidth = playerBounds.Left - currentBounds.X;
+
+                                    if (!minWidth.HasValue || candidateWidth < minWidth.Value)
+                                    {
+                                        minWidth = candidateWidth;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Y方向の拡大をチェック
+                        if (isGrowingHeight)
+                        {
+                            // X方向で調整された幅、またはX方向に拡大していない場合は現在の幅を使用
+                            int widthForYCheck = isGrowingWidth ? (minWidth ?? proposedSize.Width) : currentBounds.Width;
+
+                            Rectangle yResize = new Rectangle(
+                                currentBounds.X,
+                                currentBounds.Y,
+                                widthForYCheck,
+                                proposedSize.Height
+                            );
+
+                            if (yResize.IntersectsWith(playerBounds))
+                            {
+                                // 上から下に拡大している場合
+                                if (currentBounds.Y < playerBounds.Y)
+                                {
+                                    int candidateHeight = playerBounds.Top - currentBounds.Y;
+
+                                    if (!minHeight.HasValue || candidateHeight < minHeight.Value)
+                                    {
+                                        minHeight = candidateHeight;
+                                    }
                                 }
                             }
                         }
@@ -602,6 +738,27 @@ namespace MultiWindowActionGame.Services
             }
 
             return adjustedSize;
+        }
+
+        /// <summary>
+        /// プレイヤーが指定ウィンドウまたはその子孫の子であるかチェック
+        /// 親が子を押すことを防止するために使用
+        /// </summary>
+        /// <param name="player">プレイヤー</param>
+        /// <param name="window">チェック対象ウィンドウ</param>
+        /// <returns>プレイヤーがウィンドウの子孫の場合true</returns>
+        private bool IsPlayerDescendantOfWindow(PlayerForm player, GameWindow window)
+        {
+            GameWindow? currentParent = player.Parent;
+            while (currentParent != null)
+            {
+                if (currentParent == window)
+                {
+                    return true;
+                }
+                currentParent = currentParent.Parent;
+            }
+            return false;
         }
     }
 }

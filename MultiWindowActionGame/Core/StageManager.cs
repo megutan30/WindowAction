@@ -74,29 +74,31 @@ namespace MultiWindowActionGame.Core
 
         private void InitializeStages()
         {
-            //ムーバル + 不可侵ウィンドウバリエーション
-            stages.Add(new StageData
-            {
-                Windows = new List<(WindowType type, Point location, Size size, string? text)>
-            {
-                (WindowType.NormalBlackNoEntry, new Point(125, 750), new Size(625, 250),null),
-                (WindowType.Movable, new Point(688, 763), new Size(200, 150),null),
-                (WindowType.NormalBlack, new Point(1250, 750), new Size(625, 250),null),
-                (WindowType.ResizableNoEntry, new Point(100, 200), new Size(1500, 550),null),
-                (WindowType.TextDisplay, new Point(625, 63), new Size(375, 125), "Stage 2"),
-                (WindowType.Movable, new Point(500, 400), new Size(180, 120),null),
-                //(WindowType.Minimizable, new Point(300, 250), new Size(450, 300),null),
-            },
-                GoalPosition = new Point(1625, 875),
-                GoalInFront = true,
-                PlayerStartPosition = new Point(188, 813),
-                NoEntryZones = new List<(Point, Size)>
-                {
-                },
+            ////ムーバル + 不可侵ウィンドウバリエーション
+            //stages.Add(new StageData
+            //{
+            //    Windows = new List<(WindowType type, Point location, Size size, string? text)>
+            //{
+            //    (WindowType.Movable, new Point(1088, 363), new Size(500, 500),null),
+            //    (WindowType.ResizableNoEntry, new Point(300, 200), new Size(900, 550),null),
+            //    (WindowType.NormalBlack, new Point(300, 900), new Size(200, 200),null),
+            //    (WindowType.Resizable, new Point(600, 800), new Size(200, 200),null),
+            //    (WindowType.Minimizable, new Point(900, 900), new Size(200, 200),null),
+            //    (WindowType.Movable, new Point(500, 400), new Size(500, 220),null),
+            //    (WindowType.TextDisplay, new Point(625, 63), new Size(375, 125), "Stage 2"),
+            //    //(WindowType.Minimizable, new Point(300, 250), new Size(450, 300),null),
+            //},
+            //    GoalPosition = new Point(675, 525),
+            //    GoalInFront = true,
+            //    PlayerStartPosition = new Point(5, 513),
+            //    NoEntryZones = new List<(Point, Size)>
+            //    {
+            //    },
 
-                ToTitaleButtonPosition = new Point(106, 113),
-                RetryButtonPosition = new Point(369, 113),
-            });
+            //    ToTitaleButtonPosition = new Point(106, 113),
+            //    RetryButtonPosition = new Point(369, 113),
+            //    EnableDesktopIcons = true,
+            //})
 
             // ステージデータの初期化
             // タイトルステージ（インデックス0）
@@ -104,10 +106,10 @@ namespace MultiWindowActionGame.Core
             {
                 Windows = new List<(WindowType type, Point location, Size size, string? text)>
             {
-                (WindowType.NoEntry, new Point(625, 750), new Size(625, 188),null),
+                (WindowType.NormalBlack, new Point(625, 750), new Size(625, 188),null),
                 (WindowType.NormalBlack, new Point(250, 563), new Size(500, 250),null),
                 (WindowType.NormalBlack, new Point(1125, 563), new Size(500, 250),null),
-                (WindowType.Movable, new Point(250, 375), new Size(500, 250),null),
+                (WindowType.NormalBlack, new Point(250, 375), new Size(500, 250),null),
                 (WindowType.NormalBlack, new Point(1125, 375), new Size(500, 250),null),
                 (WindowType.TextDisplay, new Point(625, 150), new Size(625, 313), "Window Action Game"),
                 // 必要に応じて他のウィンドウを追加
@@ -374,8 +376,8 @@ namespace MultiWindowActionGame.Core
                 {
                 },
 
-                ToTitaleButtonPosition = new Point(106, 113),
-                RetryButtonPosition = new Point(369, 113),
+                ToTitaleButtonPosition = new Point(500, 300),
+                RetryButtonPosition = new Point(700, 300),
             });
             //Stage7
             //親子関係を利用する
@@ -400,6 +402,52 @@ namespace MultiWindowActionGame.Core
                 ToTitaleButtonPosition = new Point(106, 113),
                 RetryButtonPosition = new Point(369, 113),
             });
+
+            //不可侵ウィンドウ
+            stages.Add(new StageData
+            {
+                Windows = new List<(WindowType type, Point location, Size size, string? text)>
+            {
+                (WindowType.NormalBlack, new Point(500, 550), new Size(500, 300),null),
+                (WindowType.NormalBlack, new Point(900, 550), new Size(500, 300),null),
+                (WindowType.NormalBlackNoEntry, new Point(125, 750), new Size(625, 250),null),
+                (WindowType.NormalBlackNoEntry, new Point(1250, 750), new Size(625, 250),null),
+                (WindowType.TextDisplay, new Point(625, 63), new Size(375, 125), "Stage 14"),
+                //(WindowType.Minimizable, new Point(300, 250), new Size(450, 300),null),
+            },
+                GoalPosition = new Point(1625, 875),
+                GoalInFront = true,
+                PlayerStartPosition = new Point(188, 813),
+                NoEntryZones = new List<(Point, Size)>
+                {
+                },
+
+                ToTitaleButtonPosition = new Point(106, 113),
+                RetryButtonPosition = new Point(369, 113),
+            });
+            //不可侵ウィンドウ2
+            stages.Add(new StageData
+            {
+                Windows = new List<(WindowType type, Point location, Size size, string? text)>
+            {
+                (WindowType.NormalBlack, new Point(500, 250), new Size(500, 600),null),
+                (WindowType.NormalBlack, new Point(900, 250), new Size(500, 600),null),
+                (WindowType.NormalBlackNoEntry, new Point(125, 650), new Size(625, 350),null),
+                (WindowType.NormalBlackNoEntry, new Point(1250, 650), new Size(625, 350),null),
+                (WindowType.TextDisplay, new Point(625, 63), new Size(375, 125), "Stage 15"),
+                //(WindowType.Minimizable, new Point(300, 250), new Size(450, 300),null),
+            },
+                GoalPosition = new Point(625, 375),
+                GoalInFront = true,
+                PlayerStartPosition = new Point(188, 813),
+                NoEntryZones = new List<(Point, Size)>
+                {
+                },
+
+                ToTitaleButtonPosition = new Point(106, 113),
+                RetryButtonPosition = new Point(369, 113),
+            });
+
             //Stage8
             //最小化
             stages.Add(new StageData
@@ -408,7 +456,7 @@ namespace MultiWindowActionGame.Core
             {
                 (WindowType.NormalBlack, new Point(625, 313), new Size(625, 725),null),
                 (WindowType.Minimizable, new Point(625, 375), new Size(625, 375),null),
-                (WindowType.TextDisplay, new Point(625, 63), new Size(375, 125), "Stage 14"),
+                (WindowType.TextDisplay, new Point(625, 63), new Size(375, 125), "Stage 16"),
             },
                 GoalPosition = new Point(750, 875),
                 GoalInFront = true,
@@ -420,8 +468,63 @@ namespace MultiWindowActionGame.Core
                 ToTitaleButtonPosition = new Point(106, 113),
                 RetryButtonPosition = new Point(369, 113),
             });
-            //Stage9
-            //ウィンドウ外に出る
+
+
+
+            //ウィンドウ外に出る1
+            stages.Add(new StageData
+            {
+                Windows = new List<(WindowType type, Point location, Size size, string? text)>
+            {
+                (WindowType.Minimizable, new Point(250, 750), new Size(375, 250),null),
+                (WindowType.TextDisplay, new Point(625, 63), new Size(375, 125), "Stage 17"),
+            },
+                GoalPosition = new Point(750, 925),
+                GoalInFront = true,
+                PlayerStartPosition = new Point(375, 875),
+
+                ToTitaleButtonPosition = new Point(106, 113),
+                RetryButtonPosition = new Point(369, 113),
+            });
+
+            //ウィンドウ外に出る2
+            stages.Add(new StageData
+            {
+                Windows = new List<(WindowType type, Point location, Size size, string? text)>
+            {
+                (WindowType.Minimizable, new Point(250, 750), new Size(375, 250),null),
+                (WindowType.Minimizable, new Point(750, 750), new Size(375, 250),null),
+                (WindowType.TextDisplay, new Point(625, 63), new Size(375, 125), "Stage 18"),
+            },
+                GoalPosition = new Point(950, 925),
+                GoalInFront = true,
+                PlayerStartPosition = new Point(375, 875),
+
+                ToTitaleButtonPosition = new Point(106, 113),
+                RetryButtonPosition = new Point(369, 113),
+            });
+
+            //ウィンドウ外に出る3
+            stages.Add(new StageData
+            {
+                Windows = new List<(WindowType type, Point location, Size size, string? text)>
+            {
+                (WindowType.Minimizable, new Point(50, 750), new Size(375, 250),null),
+                (WindowType.NormalBlack, new Point(750, 750), new Size(375, 250),null),
+                (WindowType.TextDisplay, new Point(625, 63), new Size(375, 125), "Stage 19"),
+            },
+                GoalPosition = new Point(1750, 525),
+                GoalInFront = true,
+                PlayerStartPosition = new Point(275, 875),
+                NoEntryZones = new List<(Point, Size)>
+            {
+                (new Point(1250, 613), new Size(825, 325)),
+                (new Point(500, 906), new Size(125, 188)),
+            },
+                ToTitaleButtonPosition = new Point(106, 113),
+                RetryButtonPosition = new Point(369, 113),
+            });
+            //ウィンドウ外に出る4
             stages.Add(new StageData
             {
                 Windows = new List<(WindowType type, Point location, Size size, string? text)>
@@ -430,7 +533,7 @@ namespace MultiWindowActionGame.Core
                 (WindowType.NormalBlack, new Point(625, 594), new Size(375, 250),null),
                 (WindowType.NormalBlack, new Point(875, 438), new Size(375, 250),null),
                 (WindowType.Minimizable, new Point(1250, 63), new Size(625, 250),null),
-                (WindowType.TextDisplay, new Point(625, 63), new Size(375, 125), "Stage 15"),
+                (WindowType.TextDisplay, new Point(625, 63), new Size(375, 125), "Stage 20"),
             },
                 GoalPosition = new Point(1750, 125),
                 GoalInFront = true,
@@ -444,14 +547,31 @@ namespace MultiWindowActionGame.Core
                 ToTitaleButtonPosition = new Point(106, 113),
                 RetryButtonPosition = new Point(369, 113),
             });
+
+            //デスクトップアイコン
+            stages.Add(new StageData
+            {
+                Windows = new List<(WindowType type, Point location, Size size, string? text)>
+            {
+                (WindowType.Minimizable, new Point(250, 750), new Size(375, 250),null),
+                (WindowType.TextDisplay, new Point(625, 463), new Size(575, 125), "Stage21 DeskTopIcon"),
+            },
+                GoalPosition = new Point(1750, 125),
+                GoalInFront = true,
+                PlayerStartPosition = new Point(375, 875),
+
+                ToTitaleButtonPosition = new Point(106, 113),
+                RetryButtonPosition = new Point(369, 113),
+                EnableDesktopIcons = true,
+            });
             //クリア画面
             stages.Add(new StageData
             {
                 Windows = new List<(WindowType type, Point location, Size size, string? text)>
             {
                 (WindowType.NormalBlack, new Point(625, 750), new Size(625, 188),null),
-                (WindowType.TextDisplay, new Point(250, 563), new Size(500, 250),""),
-                (WindowType.TextDisplay, new Point(1125, 563), new Size(500, 250),""),
+                (WindowType.TextDisplay, new Point(250, 563), new Size(500, 250),"Game"),
+                (WindowType.TextDisplay, new Point(1125, 563), new Size(500, 250),"Clear"),
                 (WindowType.NormalBlack, new Point(250, 375), new Size(500, 250),null),
                 (WindowType.NormalBlack, new Point(1125, 375), new Size(500, 250),null),
                 (WindowType.TextDisplay, new Point(625, 150), new Size(625, 313), "Thank you!!"),
@@ -851,6 +971,16 @@ namespace MultiWindowActionGame.Core
             }
             return stages[stageNumber];
         }
+
+        public StageData? GetCurrentStage()
+        {
+            if (currentStage < 0 || currentStage >= stages.Count)
+            {
+                return null;
+            }
+            return stages[currentStage];
+        }
+
         public bool CheckGoal(PlayerForm player)
         {
             if (currentGoal == null || currentGoal.IsMinimized) return false;
@@ -983,5 +1113,6 @@ namespace MultiWindowActionGame.Core
         public Point? ExitButtonPosition { get; set; }
         public Point? ToTitaleButtonPosition { get; set; }
         public bool IsTitleStage { get; set; }
+        public bool EnableDesktopIcons { get; set; } = false;
     }
 }

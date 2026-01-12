@@ -7,12 +7,13 @@ using MultiWindowActionGame.Windows;
 using MultiWindowActionGame.DI;
 using MultiWindowActionGame.Interfaces;
 using MultiWindowActionGame.UI;
+using MultiWindowActionGame.Managers;
 
 namespace MultiWindowActionGame.Core
 {
     static class Program
     {
-        public static Form? mainForm;
+        public static GameForm? mainForm;
 
         [DllImport("user32.dll")]
         private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
@@ -51,19 +52,7 @@ namespace MultiWindowActionGame.Core
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
-            var screenBounds = Screen.PrimaryScreen.Bounds;
-            mainForm = new Form
-            {
-                FormBorderStyle = FormBorderStyle.None,
-                WindowState = FormWindowState.Normal, // Maximizedではなく明示的にサイズ設定
-                Location = new Point(0, 0),
-                Size = screenBounds.Size,
-                TopMost = true,
-                ShowInTaskbar = false,
-                BackColor = Color.Black,
-                TransparencyKey = Color.Black,
-                Text = "Game"
-            };
+            mainForm = new GameForm();
 
             // デバッグ情報を出力
 
@@ -98,6 +87,12 @@ namespace MultiWindowActionGame.Core
 
             // デスクトップアイコン管理機能を初期化（ゲーム初期化前に実行）
             DesktopIconHelper.Initialize();
+
+            // Shell通知を登録（mainFormのハンドルを使用）
+            if (DesktopIconHelper.Current != null)
+            {
+                ((DesktopIconManager)DesktopIconHelper.Current).InitializeChangeNotification(mainForm);
+            }
 
             // DIコンテナからMainGameを解決
             var game = serviceContainer.Resolve<IMainGame>();

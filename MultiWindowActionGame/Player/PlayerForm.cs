@@ -27,6 +27,7 @@ namespace MultiWindowActionGame.Player
         private readonly IPlayerPhysics? physics;
         private IPlayerWindowInteraction? windowInteraction;
         private readonly IPlayerStateMachine? stateMachine;
+        private readonly IStageManager? stageManager;  // Fallbackパターン用（null許容）
 
         // アニメーションシステム
         private PlayerAnimation animation = new PlayerAnimation();
@@ -72,7 +73,8 @@ namespace MultiWindowActionGame.Player
             IPlayerInputHandler? inputHandler = null,
             IPlayerPhysics? physics = null,
             IPlayerWindowInteraction? windowInteraction = null,
-            IPlayerStateMachine? stateMachine = null)
+            IPlayerStateMachine? stateMachine = null,
+            IStageManager? stageManager = null)
         {
             this.gameSettings = gameSettings;
             this.windowManager = windowManager;
@@ -81,6 +83,7 @@ namespace MultiWindowActionGame.Player
             this.physics = physics;
             this.windowInteraction = windowInteraction;
             this.stateMachine = stateMachine;
+            this.stageManager = stageManager;  // null許容（Fallback: StageManager.Current）
 
             var gameSettingsSafe = (gameSettings ?? GameSettings.Current);
             settings = gameSettingsSafe.Player;
@@ -336,6 +339,21 @@ namespace MultiWindowActionGame.Player
                 movement = physics.CheckHorizontalCollision(collisionBounds, movement);
             }
 
+            // 垂直方向のスイープ衝突判定を適用（ジャンプ時の天井貫通を防ぐ）
+            if (physics != null && Math.Abs(movement.Y) > 0.1f)
+            {
+                Vector2 originalMovement = movement;
+                movement = physics.CheckVerticalCollision(collisionBounds, movement);
+
+                // 天井衝突検出: 上昇中に移動が制限された場合
+                if (originalMovement.Y < 0 && movement.Y > originalMovement.Y)
+                {
+                    // 天井にぶつかった - 速度をリセットして落下開始
+                    physics.SetVerticalVelocity(0);
+                    animation.ResetScale();
+                }
+            }
+
             // 当たり判定領域で移動を計算
             Rectangle proposedCollision = new Rectangle(
                 collisionBounds.X + (int)movement.X,
@@ -356,22 +374,33 @@ namespace MultiWindowActionGame.Player
                 });
             }
 
-            // ウィンドウ遷移処理
-            windowInteraction.HandleWindowTransitions(proposedCollision, collisionBounds);
-
             // ウィンドウ衝突処理（親がnullの場合のみ）
             if (Parent == null)
             {
-                proposedCollision = windowInteraction.HandleWindowCollisions(proposedCollision, collisionBounds);
+                var (adjustedCollision, hitCeiling) = windowInteraction.HandleWindowCollisions(proposedCollision, collisionBounds);
+                proposedCollision = adjustedCollision;
+
+                // 天井衝突時は速度をリセット
+                if (hitCeiling)
+                {
+                    physics?.SetVerticalVelocity(0);
+                    animation.ResetScale();
+                }
             }
 
             // ボタンとの衝突判定（ウィンドウ内外に関係なく実行）
             proposedCollision = HandleButtonCollisions(proposedCollision);
 
-            // デスクトップアイコンとの衝突判定（一時的に無効化）
-            // TODO: デスクトップアイコン判定を再有効化する場合はコメントを外す
-            // proposedCollision = HandleDesktopIconCollisions(proposedCollision);
+            // デスクトップアイコンとの衝突判定（ステージ別制御）
+            var currentStage = stageManager?.GetCurrentStage() ?? StageManager.Current.GetCurrentStage();
+            if (currentStage?.EnableDesktopIcons == true)
+            {
+                proposedCollision = HandleDesktopIconCollisions(proposedCollision);
+            }
 
+            // ウィンドウ遷移処理
+            windowInteraction.HandleWindowTransitions(proposedCollision, collisionBounds);
+            
             UpdatePosition(proposedCollision.Location);
         }
         private void OnEnterWindow(GameWindow window)
@@ -476,7 +505,11 @@ namespace MultiWindowActionGame.Player
                     }
                     else if (collisionBounds.Top >= iconBounds.Bottom && adjustedCollision.Top < iconBounds.Bottom)
                     {
+                        // デスクトップアイコンの底面に衝突（下からジャンプしてぶつかった）
                         adjustedCollision.Y = iconBounds.Bottom;
+                        // 垂直速度をゼロにして、すぐに降下させる
+                        physics?.SetVerticalVelocity(0);
+                        animation.ResetScale();
                     }
                     else if (collisionBounds.Right <= iconBounds.Left && adjustedCollision.Right > iconBounds.Left)
                     {
@@ -751,10 +784,10 @@ namespace MultiWindowActionGame.Player
             if (!windowInteraction!.IsValidMove(newCollision, Parent))
             {
                 newCollision = new Rectangle(
-                    Math.Max(Parent?.AdjustedBounds.Left ?? 0,
-                        Math.Min(collisionBounds.X, (Parent?.AdjustedBounds.Right ?? Program.mainForm?.ClientSize.Width ?? 1920) - newSize.Width)),
-                    Math.Max(Parent?.AdjustedBounds.Top ?? 0,
-                        Math.Min(collisionBounds.Y, (Parent?.AdjustedBounds.Bottom ?? Program.mainForm?.ClientSize.Height ?? 1080) - newSize.Height)),
+                    Math.Max(Parent?.CollisionBounds.Left ?? 0,
+                        Math.Min(collisionBounds.X, (Parent?.CollisionBounds.Right ?? Program.mainForm?.ClientSize.Width ?? 1920) - newSize.Width)),
+                    Math.Max(Parent?.CollisionBounds.Top ?? 0,
+                        Math.Min(collisionBounds.Y, (Parent?.CollisionBounds.Bottom ?? Program.mainForm?.ClientSize.Height ?? 1080) - newSize.Height)),
                     newSize.Width,
                     newSize.Height
                 );

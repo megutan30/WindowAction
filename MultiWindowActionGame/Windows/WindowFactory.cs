@@ -2,6 +2,7 @@
 using System.Drawing;
 using MultiWindowActionGame.Core;
 using MultiWindowActionGame.Interfaces;
+using MultiWindowActionGame.Managers;
 using static System.Net.Mime.MediaTypeNames;
 
 namespace MultiWindowActionGame.Windows
@@ -13,38 +14,41 @@ namespace MultiWindowActionGame.Windows
         private readonly IInputService inputService;
         private readonly INoEntryZoneManager noEntryZoneManager;
         private readonly ICollisionService collisionService;
+        private readonly NoEntryBoundaryCollider boundaryCollider;
 
         public WindowFactory(
             IWindowManager windowManager,
             IGameSettings gameSettings,
             IInputService inputService,
             INoEntryZoneManager noEntryZoneManager,
-            ICollisionService collisionService)
+            ICollisionService collisionService,
+            NoEntryBoundaryCollider boundaryCollider)
         {
             this.windowManager = windowManager ?? throw new ArgumentNullException(nameof(windowManager));
             this.gameSettings = gameSettings ?? throw new ArgumentNullException(nameof(gameSettings));
             this.inputService = inputService ?? throw new ArgumentNullException(nameof(inputService));
             this.noEntryZoneManager = noEntryZoneManager ?? throw new ArgumentNullException(nameof(noEntryZoneManager));
             this.collisionService = collisionService ?? throw new ArgumentNullException(nameof(collisionService));
+            this.boundaryCollider = boundaryCollider ?? throw new ArgumentNullException(nameof(boundaryCollider));
         }
 
         public GameWindow CreateWindow(WindowType type, Point location, Size size, string? text = null, bool showImmediately = true)
         {
             IWindowStrategy strategy = type switch
             {
-                WindowType.NormalBlack => new NormalWindowStrategy(inputService, gameSettings, noEntryZoneManager, collisionService),
-                WindowType.NormalWhite => new NormalWindowStrategy(inputService, gameSettings, noEntryZoneManager, collisionService),
-                WindowType.Resizable => new ResizableWindowStrategy(inputService, gameSettings, noEntryZoneManager, collisionService),
-                WindowType.Movable => new MovableWindowStrategy(inputService, gameSettings, noEntryZoneManager, collisionService),
-                WindowType.Deletable => new DeletableWindowStrategy(inputService, gameSettings, noEntryZoneManager, collisionService),
-                WindowType.Minimizable => new MinimizableWindowStrategy(inputService, gameSettings, noEntryZoneManager, collisionService),
-                WindowType.TextDisplay => new TextDisplayWindowStrategy(text ?? "NULL", inputService, gameSettings, noEntryZoneManager, collisionService),
-                WindowType.NoEntry => new NoEntryWindowStrategy(inputService, gameSettings, noEntryZoneManager, collisionService),
-                WindowType.ResizableNoEntry => new ResizableNoEntryWindowStrategy(inputService, gameSettings, noEntryZoneManager, collisionService),
-                WindowType.MovableNoEntry => new MovableNoEntryWindowStrategy(inputService, gameSettings, noEntryZoneManager, collisionService),
-                WindowType.MinimizableNoEntry => new MinimizableNoEntryWindowStrategy(inputService, gameSettings, noEntryZoneManager, collisionService),
-                WindowType.NormalBlackNoEntry => new NoEntryWindowStrategy(inputService, gameSettings, noEntryZoneManager, collisionService),
-                WindowType.NormalWhiteNoEntry => new NoEntryWindowStrategy(inputService, gameSettings, noEntryZoneManager, collisionService),
+                WindowType.NormalBlack => new NormalWindowStrategy(inputService, gameSettings, noEntryZoneManager, collisionService, windowManager, boundaryCollider),
+                WindowType.NormalWhite => new NormalWindowStrategy(inputService, gameSettings, noEntryZoneManager, collisionService, windowManager, boundaryCollider),
+                WindowType.Resizable => new ResizableWindowStrategy(inputService, gameSettings, noEntryZoneManager, collisionService, windowManager, boundaryCollider),
+                WindowType.Movable => new MovableWindowStrategy(inputService, gameSettings, noEntryZoneManager, collisionService, windowManager, boundaryCollider),
+                WindowType.Deletable => new DeletableWindowStrategy(inputService, gameSettings, noEntryZoneManager, collisionService, windowManager, boundaryCollider),
+                WindowType.Minimizable => new MinimizableWindowStrategy(inputService, gameSettings, noEntryZoneManager, collisionService, windowManager, boundaryCollider),
+                WindowType.TextDisplay => new TextDisplayWindowStrategy(text ?? "NULL", inputService, gameSettings, noEntryZoneManager, collisionService, windowManager, boundaryCollider),
+                WindowType.NoEntry => new NoEntryWindowStrategy(inputService, gameSettings, noEntryZoneManager, collisionService, windowManager, boundaryCollider),
+                WindowType.ResizableNoEntry => new ResizableNoEntryWindowStrategy(inputService, gameSettings, noEntryZoneManager, collisionService, windowManager, boundaryCollider),
+                WindowType.MovableNoEntry => new MovableNoEntryWindowStrategy(inputService, gameSettings, noEntryZoneManager, collisionService, windowManager, boundaryCollider),
+                WindowType.MinimizableNoEntry => new MinimizableNoEntryWindowStrategy(inputService, gameSettings, noEntryZoneManager, collisionService, windowManager, boundaryCollider),
+                WindowType.NormalBlackNoEntry => new NoEntryWindowStrategy(inputService, gameSettings, noEntryZoneManager, collisionService, windowManager, boundaryCollider),
+                WindowType.NormalWhiteNoEntry => new NoEntryWindowStrategy(inputService, gameSettings, noEntryZoneManager, collisionService, windowManager, boundaryCollider),
                 _ => throw new ArgumentException("Invalid window type", nameof(type))
             };
 

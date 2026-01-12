@@ -109,6 +109,14 @@ namespace MultiWindowActionGame.Services
                             continue;
                         }
 
+                        // excludeWindowの親もスキップ（親の後ろにある通常ウィンドウは見えないと判定すべき）
+                        if (excludeWindow != null && excludeWindow.Parent != null && coveringWindow == excludeWindow.Parent)
+                        {
+                            // 親ウィンドウで領域を除外（親の後ろは見えない）
+                            visibleRegion.Exclude(coveringWindow.CollisionBounds);
+                            continue;
+                        }
+
                         // 不可侵ウィンドウのみチェック（通常ウィンドウは透明扱い）
                         if (!coveringWindow.IsNoEntryWindow)
                         {

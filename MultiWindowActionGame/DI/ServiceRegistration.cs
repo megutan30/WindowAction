@@ -44,12 +44,15 @@ namespace MultiWindowActionGame.DI
 
         private static void RegisterCoreServices(IServiceContainer container)
         {
-            // Create logs directory if it doesn't exist
+#if DEBUG
+            // Debug構成: ファイルにログを出力
             var logPath = Path.Combine(Directory.GetCurrentDirectory(), "logs", "game.log");
-            
-            // Register logging
             container.RegisterSingleton<ILogger>(new FileLogger(logPath));
-            
+#else
+            // Release構成: ログを出力しない
+            container.RegisterSingleton<ILogger>(new NullLogger());
+#endif
+
             // Register error handling (depends on logger)
             container.RegisterSingleton<IErrorHandler, ErrorHandler>();
         }

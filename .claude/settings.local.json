@@ -21,7 +21,15 @@
       "Bash(git checkout:*)",
       "Bash(git rm:*)",
       "Bash(dotnet clean:*)",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(cd:*)",
+      "Bash(git log:*)",
+      "Bash(Select-String -Pattern \"error|成功|エラー\")",
+      "Bash(Select-Object -First 5)",
+      "Bash(dotnet list:*)",
+      "Bash(dotnet restore:*)",
+      "Bash(dotnet --version:*)",
+      "Bash(dotnet sdk:*)"
     ],
     "deny": []
   }

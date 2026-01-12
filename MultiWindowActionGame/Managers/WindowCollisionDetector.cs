@@ -36,7 +36,7 @@ namespace MultiWindowActionGame.Managers
                 foreach (var window in topLevelWindows.Reverse())
                 {
                     if (window == currentWindow) continue;
-                    if (window.AdjustedBounds.Contains(bounds))
+                    if (window.CollisionBounds.Contains(bounds))
                     {
                         return window;
                     }
@@ -63,7 +63,7 @@ namespace MultiWindowActionGame.Managers
                 if (currentWindow == null)
                 {
                     return windowsList
-                        .Where(w => IsWindowContainedWithinBounds(w.AdjustedBounds, bounds))
+                        .Where(w => IsWindowContainedWithinBounds(w.CollisionBounds, bounds))
                         .OrderByDescending(w => zOrderManager.GetWindowZIndex(w, allWindows))
                         .FirstOrDefault();
                 }
@@ -75,7 +75,7 @@ namespace MultiWindowActionGame.Managers
                     for (int i = windowsList.Count - 1; i >= 0; i--)
                     {
                         var window = windowsList[i];
-                        if (IsPointWithinBounds(window.AdjustedBounds, point))
+                        if (IsPointWithinBounds(window.CollisionBounds, point))
                         {
                             if (!windowPoints.ContainsKey(window))
                             {
@@ -100,7 +100,7 @@ namespace MultiWindowActionGame.Managers
                         {
                             Window = w.Key,
                             Points = w.Value,
-                            BottomEdge = w.Key.AdjustedBounds.Bottom
+                            BottomEdge = w.Key.CollisionBounds.Bottom
                         })
                         .OrderBy(w => w.BottomEdge)
                         .ThenByDescending(w => zOrderManager.GetWindowZIndex(w.Window, allWindows))
@@ -109,7 +109,7 @@ namespace MultiWindowActionGame.Managers
                     if (candidateWindows.Any())
                     {
                         var bestWindow = candidateWindows.First();
-                        if (bestWindow.BottomEdge <= currentWindow.AdjustedBounds.Bottom)
+                        if (bestWindow.BottomEdge <= currentWindow.CollisionBounds.Bottom)
                         {
                             return bestWindow.Window;
                         }
@@ -125,7 +125,7 @@ namespace MultiWindowActionGame.Managers
                         {
                             Window = w.Key,
                             Points = w.Value,
-                            BottomEdge = w.Key.AdjustedBounds.Bottom
+                            BottomEdge = w.Key.CollisionBounds.Bottom
                         })
                         .OrderBy(w => w.BottomEdge)
                         .ThenByDescending(w => zOrderManager.GetWindowZIndex(w.Window, allWindows))
@@ -146,7 +146,7 @@ namespace MultiWindowActionGame.Managers
             lock (lockObject)
             {
                 return allWindows
-                    .Where(w => IsWindowContainedWithinBounds(w.Bounds, bounds))
+                    .Where(w => IsWindowContainedWithinBounds(w.CollisionBounds, bounds))
                     .OrderByDescending(w => zOrderManager.GetWindowZIndex(w, allWindows))
                     .FirstOrDefault();
             }
@@ -179,7 +179,7 @@ namespace MultiWindowActionGame.Managers
             {
                 foreach (var window in allWindows)
                 {
-                    float distance = CalculateDistanceToWindow(bounds, window.AdjustedBounds);
+                    float distance = CalculateDistanceToWindow(bounds, window.CollisionBounds);
                     if (distance < minDistance)
                     {
                         minDistance = distance;

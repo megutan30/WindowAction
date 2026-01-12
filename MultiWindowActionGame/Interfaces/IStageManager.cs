@@ -15,6 +15,7 @@ namespace MultiWindowActionGame.Interfaces
         void RestartCurrentStage();
         void ToTitleStage();
         StageData GetStage(int stageNumber);
+        StageData? GetCurrentStage();  // 現在のステージデータを取得
         bool CheckGoal(PlayerForm player);
         void StartNextStage();
     }

@@ -26,9 +26,16 @@ namespace MultiWindowActionGame.Managers
                     if (shouldDrawOutline && !(target is Goal) && !(target is PlayerForm))
                     {
                         int currentIndex = allComponents.ToList().IndexOf(target);
+
+                        // CollisionBoundsを使用して正確な重なり判定を行う
+                        Rectangle targetBounds = target is GameWindow targetGw ? targetGw.CollisionBounds : target.Bounds;
                         var coveringTargets = allComponents
                             .Skip(currentIndex + 1)
-                            .Where(t => t.Bounds.IntersectsWith(target.Bounds));
+                            .Where(t =>
+                            {
+                                Rectangle coveringBounds = t is GameWindow cgw ? cgw.CollisionBounds : t.Bounds;
+                                return coveringBounds.IntersectsWith(targetBounds);
+                            });
 
                         // GameWindowの場合はCollisionBoundsを使用
                         if (target is GameWindow window)

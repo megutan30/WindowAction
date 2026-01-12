@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading.Tasks;
 using MultiWindowActionGame.Core;
+using MultiWindowActionGame.Utilities;
 
 namespace MultiWindowActionGame.Managers
 {
@@ -31,6 +33,7 @@ namespace MultiWindowActionGame.Managers
         void RefreshIcons();
         Task RefreshIconsAsync();
         bool IsInitialized { get; }
+        void InitializeChangeNotification(Form targetForm);
     }
 
     public class DesktopIconManager : IDesktopIconManager
@@ -38,14 +41,11 @@ namespace MultiWindowActionGame.Managers
         private readonly ILogger logger;
         private readonly IErrorHandler errorHandler;
         private List<DesktopIcon> cachedIcons = new List<DesktopIcon>();
-        private DateTime lastRefresh = DateTime.MinValue;
-        private readonly TimeSpan refreshInterval = TimeSpan.FromSeconds(30); // 監視システム使用時は長めに設定
         private bool isInitialized = false;
 
         // 変更監視システム
         private uint changeNotifyId = 0;
         private readonly object cacheLock = new object();
-        private bool useChangeNotification = true;
 
         // 差分検出システム
         private Dictionary<string, int> iconHashCache = new Dictionary<string, int>();
@@ -53,6 +53,9 @@ namespace MultiWindowActionGame.Managers
         // 非同期処理用
         private Task? refreshTask = null;
         private readonly CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
+
+        // レジストリ監視システム
+        private RegistryIconPositionWatcher? registryWatcher;
 
         // Win32 API定数
         private const int LVM_FIRST = 0x1000;
@@ -266,44 +269,73 @@ namespace MultiWindowActionGame.Managers
             this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
             this.errorHandler = errorHandler ?? throw new ArgumentNullException(nameof(errorHandler));
 
-            // 変更監視を開始
-            if (useChangeNotification)
-            {
-                InitializeChangeNotification();
-            }
+            // レジストリ監視を初期化
+            InitializeRegistryWatcher();
+
+            // InitializeChangeNotificationはProgram.cs側から呼び出される
         }
 
         /// <summary>
         /// デスクトップアイコン変更監視を初期化
         /// </summary>
-        private void InitializeChangeNotification()
+        /// <param name="targetForm">Shell通知を受信するフォーム</param>
+        public void InitializeChangeNotification(Form targetForm)
         {
             try
             {
-                // デスクトップフォルダのPIDLを取得
+                if (targetForm == null)
+                {
+                    logger.LogError("Target form is null, cannot register shell notification");
+                    return;
+                }
+
+                if (!targetForm.IsHandleCreated)
+                {
+                    logger.LogWarning("Target form handle not created yet");
+                    return;
+                }
+
                 var desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
                 logger.LogInfo($"Initializing desktop change notification for: {desktopPath}");
 
-                // 監視対象を設定（デスクトップフォルダ）
+                var handle = targetForm.Handle;
+                logger.LogInfo($"Using form handle: 0x{handle.ToInt64():X8}");
+
+                // 監視するイベントマスク
+                uint eventMask = SHCNE_CREATE | SHCNE_DELETE | SHCNE_RENAMEITEM |
+                                SHCNE_UPDATEITEM | SHCNE_UPDATEDIR;
+
+                // 監視対象を設定（デスクトップ全体）
                 var entry = new SHChangeNotifyEntry
                 {
-                    pidl = IntPtr.Zero, // デスクトップ全体を監視
+                    pidl = IntPtr.Zero,  // デスクトップ全体を監視
                     fRecursive = false
                 };
 
-                // 監視するイベントマスク（将来の実装用）
-                // uint eventMask = SHCNE_CREATE | SHCNE_DELETE | SHCNE_RENAMEITEM | 
-                //                SHCNE_UPDATEITEM | SHCNE_UPDATEDIR;
+                // Shell通知を登録
+                changeNotifyId = SHChangeNotifyRegister(
+                    handle,
+                    SHCNRF_ShellLevel | SHCNRF_InterruptLevel,
+                    eventMask,
+                    WM_SHNOTIFY,
+                    1,
+                    ref entry
+                );
 
-                // 監視を登録（実際のウィンドウハンドルが必要なため、後で実装）
-                // changeNotifyId = SHChangeNotifyRegister(windowHandle, SHCNRF_ShellLevel, eventMask, WM_SHNOTIFY, 1, ref entry);
-
-                logger.LogInfo("Desktop change notification initialized successfully");
+                if (changeNotifyId == 0)
+                {
+                    var errorCode = Marshal.GetLastWin32Error();
+                    logger.LogError($"Failed to register shell notification (Error code: {errorCode})");
+                }
+                else
+                {
+                    logger.LogInfo($"Desktop change notification registered successfully (ID: {changeNotifyId})");
+                }
             }
             catch (Exception ex)
             {
                 logger.LogError($"Failed to initialize change notification: {ex.Message}");
-                useChangeNotification = false; // フォールバック：定期更新方式
+                logger.LogError($"Stack trace: {ex.StackTrace}");
             }
         }
 
@@ -317,6 +349,44 @@ namespace MultiWindowActionGame.Managers
                 SHChangeNotifyDeregister(changeNotifyId);
                 changeNotifyId = 0;
                 logger.LogInfo("Desktop change notification stopped");
+            }
+        }
+
+        /// <summary>
+        /// レジストリ監視を初期化
+        /// </summary>
+        private void InitializeRegistryWatcher()
+        {
+            try
+            {
+                registryWatcher = new RegistryIconPositionWatcher(
+                    logger,
+                    OnRegistryPositionChanged
+                );
+
+                registryWatcher.StartWatching();
+                logger.LogInfo("Registry position watcher initialized");
+            }
+            catch (Exception ex)
+            {
+                logger.LogError($"Failed to initialize registry watcher: {ex.Message}");
+                registryWatcher = null; // フォールバック: Shell通知のみ
+            }
+        }
+
+        /// <summary>
+        /// レジストリ変更検知時のコールバック
+        /// </summary>
+        private void OnRegistryPositionChanged()
+        {
+            try
+            {
+                logger.LogInfo("Registry position change detected, refreshing icons...");
+                Task.Run(() => RefreshIconsAsync());
+            }
+            catch (Exception ex)
+            {
+                logger.LogError($"Error handling registry position change: {ex.Message}");
             }
         }
 
@@ -543,23 +613,7 @@ namespace MultiWindowActionGame.Managers
                         return new List<DesktopIcon>(cachedIcons);
                     }
 
-                    // 定期更新が必要な場合は非同期で実行（メインスレッドをブロックしない）
-                    if (!useChangeNotification && DateTime.Now - lastRefresh > refreshInterval)
-                    {
-                        // 非同期更新を開始（Fire and forget）
-                        _ = Task.Run(async () =>
-                        {
-                            try
-                            {
-                                await RefreshIconsAsync();
-                            }
-                            catch (Exception ex)
-                            {
-                                logger.LogError($"Background icon refresh failed: {ex.Message}");
-                            }
-                        });
-                    }
-
+                    // Shell通知で自動更新されるため、定期更新は不要
                     return new List<DesktopIcon>(cachedIcons);
                 }
             }
@@ -606,7 +660,6 @@ namespace MultiWindowActionGame.Managers
                 {
                     cachedIcons = icons;
                     UpdateIconHashCache(icons);
-                    lastRefresh = DateTime.Now;
                     isInitialized = true;
                 }
 
@@ -678,7 +731,6 @@ namespace MultiWindowActionGame.Managers
                         {
                             cachedIcons = icons;
                             UpdateIconHashCache(icons);
-                            lastRefresh = DateTime.Now;
                             isInitialized = true;
                         }
 
@@ -738,6 +790,10 @@ namespace MultiWindowActionGame.Managers
 
                 // 変更監視を停止
                 StopChangeNotification();
+
+                // レジストリ監視を停止
+                registryWatcher?.Dispose();
+                registryWatcher = null;
 
                 // リソース解放
                 cancellationTokenSource.Dispose();
@@ -1521,5 +1577,6 @@ namespace MultiWindowActionGame.Managers
             }
             return result.ToString();
         }
+
     }
 }

@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Reflection;
 using System.Text.Json;
 using MultiWindowActionGame.Interfaces;
 
@@ -123,10 +124,16 @@ namespace MultiWindowActionGame.Utilities
 
         private void InitializeFileWatcher()
         {
+            // 外部設定ファイルが存在する場合のみ監視を有効化
+            if (!File.Exists(settingsPath))
+            {
+                return;
+            }
+
             var directory = Path.GetDirectoryName(settingsPath);
             var filename = Path.GetFileName(settingsPath);
 
-            if (directory != null)
+            if (directory != null && Directory.Exists(directory))
             {
                 settingsWatcher = new FileSystemWatcher(directory, filename)
                 {
@@ -200,6 +207,7 @@ namespace MultiWindowActionGame.Utilities
         {
             try
             {
+                // 1. 外部ファイルがあればそれを優先（ユーザーカスタマイズ用）
                 if (File.Exists(settingsPath))
                 {
                     var json = File.ReadAllText(settingsPath);
@@ -212,11 +220,34 @@ namespace MultiWindowActionGame.Utilities
                         return;
                     }
                 }
+
+                // 2. 埋め込みリソースから読み込む
+                var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+                var resourceName = "MultiWindowActionGame.config.settings.json";
+                using (var stream = assembly.GetManifestResourceStream(resourceName))
+                {
+                    if (stream != null)
+                    {
+                        using (var reader = new System.IO.StreamReader(stream))
+                        {
+                            var json = reader.ReadToEnd();
+                            var settings = JsonSerializer.Deserialize<GameSettingsData>(json);
+                            if (settings != null)
+                            {
+                                Player = settings.Player;
+                                Window = settings.Window;
+                                Gameplay = settings.Gameplay;
+                                return;
+                            }
+                        }
+                    }
+                }
             }
             catch (Exception ex)
             {
             }
 
+            // 3. フォールバック: デフォルト設定
             LoadDefaultSettings();
         }
 

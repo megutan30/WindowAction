@@ -3,6 +3,7 @@ using MultiWindowActionGame.Interfaces;
 using MultiWindowActionGame.Utilities;
 using MultiWindowActionGame.Windows;
 using MultiWindowActionGame.Debug;
+using MultiWindowActionGame.Managers;
 using System;
 using System.Drawing;
 using System.Threading.Tasks;
@@ -129,13 +130,16 @@ namespace MultiWindowActionGame.Core.Systems
             {
                 // Render stage elements (goals, etc.)
                 stageManager.CurrentGoal?.Draw(g);
-                
+
                 // Render no-entry zones
                 GetNoEntryZoneManagerSafely().Draw(g);
-                
+
                 // Render windows and game objects
                 windowManager.Draw(g);
-                
+
+                // Render desktop icon collision bounds (if enabled for current stage)
+                RenderDesktopIconCollisionBounds(g);
+
                 // Render window marks/indicators
                 if (MainGame.IsDebugMode)
                 {
@@ -265,6 +269,46 @@ namespace MultiWindowActionGame.Core.Systems
             fpsTimer = 0f;
         }
 
+        private void RenderDesktopIconCollisionBounds(Graphics g)
+        {
+            try
+            {
+                // デスクトップアイコン衝突判定が有効なステージかチェック
+                var currentStage = stageManager.GetCurrentStage();
+                if (currentStage?.EnableDesktopIcons != true)
+                {
+                    return; // 無効な場合は描画しない
+                }
+
+                // デスクトップアイコンを取得
+                var desktopIcons = DesktopIconHelper.Instance?.GetDesktopIcons();
+                if (desktopIcons == null || desktopIcons.Count == 0)
+                {
+                    return; // アイコンがない場合は早期リターン
+                }
+
+                // 衝突判定領域の枠のみを描画（塗りつぶしなし）
+                using (var pen = new Pen(Color.FromArgb(180, 255, 140, 0), 3)) // 半透明オレンジ、太さ3px
+                {
+                    foreach (var icon in desktopIcons)
+                    {
+                        if (icon.IsValid)
+                        {
+                            // 衝突判定領域の枠を描画
+                            g.DrawRectangle(pen, icon.CollisionBounds);
+                        }
+                    }
+                }
+
+                logger.LogTrace($"Rendered {desktopIcons.Count} desktop icon collision bounds", SystemName);
+            }
+            catch (Exception ex)
+            {
+                // エラーが発生しても描画を続行（他の要素の描画に影響を与えない）
+                errorHandler.HandleError("Error rendering desktop icon collision bounds", ErrorSeverity.Low, ex, SystemName);
+            }
+        }
+
         protected override void OnShutdown()
         {
             try
@@ -273,10 +317,10 @@ namespace MultiWindowActionGame.Core.Systems
                 {
                     Program.mainForm.Resize -= MainForm_Resize;
                 }
-                
+
                 graphicsBuffer?.Dispose();
                 graphicsBuffer = null;
-                
+
                 logger.LogInfo("Rendering system shutdown complete", SystemName);
             }
             catch (Exception ex)

@@ -36,7 +36,7 @@ namespace MultiWindowActionGame.Managers
         public List<Rectangle> GetBoundaryRectangles(GameWindow window)
         {
             var bounds = window.CollisionBounds;
-            const int borderThickness = 5;
+            const int borderThickness = CollisionFilter.NOENTRY_BOUNDARY_WIDTH;
             var rectangles = new List<Rectangle>(4);
 
             // 上辺
@@ -131,7 +131,9 @@ namespace MultiWindowActionGame.Managers
                     {
                         if (!visibleRegion.IsEmpty(dummyGraphics))
                         {
-                            collisionRect = boundary;
+                            // 見えている部分のみの境界矩形を取得
+                            RectangleF visibleBounds = visibleRegion.GetBounds(dummyGraphics);
+                            collisionRect = Rectangle.Ceiling(visibleBounds);
                             return true;
                         }
                     }
