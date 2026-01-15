@@ -10,6 +10,12 @@ namespace MultiWindowActionGame.Services
         private readonly Queue<NotificationInfo> notifications = new Queue<NotificationInfo>();
         private readonly float displayDuration = 3.0f;
 
+        // 放置警告用
+        private bool isIdleWarningVisible = false;
+        private int idleWarningRemainingSeconds = 0;
+
+        public bool IsIdleWarningVisible => isIdleWarningVisible;
+
         private class NotificationInfo
         {
             public string Message { get; set; }
@@ -60,6 +66,10 @@ namespace MultiWindowActionGame.Services
 
         public void Draw(Graphics g)
         {
+            // 放置警告の描画（デバッグモードに関係なく表示）
+            DrawIdleWarning(g);
+
+            // 通常の通知（デバッグモードのみ）
             if (!MainGame.IsDebugMode || notifications.Count == 0) return;
 
             var current = notifications.Peek();
@@ -78,6 +88,65 @@ namespace MultiWindowActionGame.Services
                 {
                     g.DrawString(current.Message, font, brush, 10, 50);
                 }
+            }
+        }
+
+        public void ShowIdleWarning(int remainingSeconds)
+        {
+            isIdleWarningVisible = true;
+            idleWarningRemainingSeconds = remainingSeconds;
+        }
+
+        public void HideIdleWarning()
+        {
+            isIdleWarningVisible = false;
+            idleWarningRemainingSeconds = 0;
+        }
+
+        private void DrawIdleWarning(Graphics g)
+        {
+            if (!isIdleWarningVisible) return;
+
+            try
+            {
+                // 画面サイズを取得
+                var screenBounds = Program.mainForm?.ClientRectangle ?? new Rectangle(0, 0, 800, 600);
+
+                // 半透明の背景を描画
+                using (var bgBrush = new SolidBrush(Color.FromArgb(180, 0, 0, 0)))
+                {
+                    int boxWidth = 500;
+                    int boxHeight = 80;
+                    int boxX = (screenBounds.Width - boxWidth) / 2;
+                    int boxY = (screenBounds.Height - boxHeight) / 2;
+
+                    g.FillRectangle(bgBrush, boxX, boxY, boxWidth, boxHeight);
+
+                    // 枠線
+                    using (var borderPen = new Pen(Color.OrangeRed, 3))
+                    {
+                        g.DrawRectangle(borderPen, boxX, boxY, boxWidth, boxHeight);
+                    }
+                }
+
+                // 警告メッセージを描画
+                string message = $"放置されています\nあと {idleWarningRemainingSeconds} 秒でタイトルに戻ります";
+
+                using (var font = new Font("Yu Gothic UI", 16, FontStyle.Bold))
+                using (var brush = new SolidBrush(Color.OrangeRed))
+                {
+                    var format = new StringFormat
+                    {
+                        Alignment = StringAlignment.Center,
+                        LineAlignment = StringAlignment.Center
+                    };
+
+                    g.DrawString(message, font, brush, screenBounds, format);
+                }
+            }
+            catch
+            {
+                // 描画エラーは無視
             }
         }
     }

@@ -13,21 +13,24 @@ namespace MultiWindowActionGame.Core.Systems
         private readonly IWindowManager windowManager;
         private readonly IInputService inputService;
         private readonly IStageManager stageManager;
+        private readonly INotificationService notificationService;
 
         // 放置検出用
         private float idleTime = 0f;
-        private const float IDLE_TIMEOUT_SECONDS = 180f;  // 3分
+        private const float IDLE_TIMEOUT_SECONDS = 60f;  // 3分
+        private const float IDLE_WARNING_SECONDS = 10f;   // 警告表示開始
 
         public override string SystemName => "Input System";
         public override GameSystemPriority Priority => GameSystemPriority.Input;
 
-        public InputSystem(ILogger logger, IErrorHandler errorHandler, IMainGame mainGame, IWindowManager windowManager, IInputService inputService, IStageManager stageManager)
+        public InputSystem(ILogger logger, IErrorHandler errorHandler, IMainGame mainGame, IWindowManager windowManager, IInputService inputService, IStageManager stageManager, INotificationService notificationService)
             : base(logger, errorHandler)
         {
             this.mainGame = mainGame ?? throw new ArgumentNullException(nameof(mainGame));
             this.windowManager = windowManager ?? throw new ArgumentNullException(nameof(windowManager));
             this.inputService = inputService ?? throw new ArgumentNullException(nameof(inputService));
             this.stageManager = stageManager ?? throw new ArgumentNullException(nameof(stageManager));
+            this.notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
         }
 
         protected override async Task OnInitializeAsync()
@@ -100,6 +103,7 @@ namespace MultiWindowActionGame.Core.Systems
             if (stageManager.CurrentStageIndex == 0)
             {
                 idleTime = 0f;
+                notificationService.HideIdleWarning();
                 return;
             }
 
@@ -107,14 +111,28 @@ namespace MultiWindowActionGame.Core.Systems
             if (inputService.IsAnyGameKeyPressed() || inputService.HasMouseMoved())
             {
                 idleTime = 0f;
+                notificationService.HideIdleWarning();
             }
             else
             {
                 idleTime += deltaTime;
+
+                // 残り時間を計算
+                float remainingTime = IDLE_TIMEOUT_SECONDS - idleTime;
+
+                // 残り10秒以下で警告表示
+                if (remainingTime <= IDLE_WARNING_SECONDS && remainingTime > 0)
+                {
+                    int remainingSeconds = (int)Math.Ceiling(remainingTime);
+                    notificationService.ShowIdleWarning(remainingSeconds);
+                }
+
+                // タイムアウト
                 if (idleTime >= IDLE_TIMEOUT_SECONDS)
                 {
                     logger.LogInfo($"Idle timeout reached ({IDLE_TIMEOUT_SECONDS}s), returning to title", SystemName);
                     idleTime = 0f;
+                    notificationService.HideIdleWarning();
                     stageManager.ToTitleStage();
                 }
             }
