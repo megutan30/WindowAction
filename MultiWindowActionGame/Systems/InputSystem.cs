@@ -12,16 +12,22 @@ namespace MultiWindowActionGame.Core.Systems
         private readonly IMainGame mainGame;
         private readonly IWindowManager windowManager;
         private readonly IInputService inputService;
+        private readonly IStageManager stageManager;
+
+        // 放置検出用
+        private float idleTime = 0f;
+        private const float IDLE_TIMEOUT_SECONDS = 180f;  // 3分
 
         public override string SystemName => "Input System";
         public override GameSystemPriority Priority => GameSystemPriority.Input;
 
-        public InputSystem(ILogger logger, IErrorHandler errorHandler, IMainGame mainGame, IWindowManager windowManager, IInputService inputService)
+        public InputSystem(ILogger logger, IErrorHandler errorHandler, IMainGame mainGame, IWindowManager windowManager, IInputService inputService, IStageManager stageManager)
             : base(logger, errorHandler)
         {
             this.mainGame = mainGame ?? throw new ArgumentNullException(nameof(mainGame));
             this.windowManager = windowManager ?? throw new ArgumentNullException(nameof(windowManager));
             this.inputService = inputService ?? throw new ArgumentNullException(nameof(inputService));
+            this.stageManager = stageManager ?? throw new ArgumentNullException(nameof(stageManager));
         }
 
         protected override async Task OnInitializeAsync()
@@ -34,6 +40,9 @@ namespace MultiWindowActionGame.Core.Systems
         {
             try
             {
+                // 放置検出
+                CheckIdleTimeout(deltaTime);
+
                 // Global input handling
                 HandleGlobalInput();
 
@@ -79,6 +88,35 @@ namespace MultiWindowActionGame.Core.Systems
             {
                 logger.LogWarning("Emergency exit requested", null, SystemName);
                 Application.Exit();
+            }
+        }
+
+        /// <summary>
+        /// 放置検出：一定時間入力がなければタイトル画面に戻る
+        /// </summary>
+        private void CheckIdleTimeout(float deltaTime)
+        {
+            // タイトルステージ（ステージ0）では放置検出しない
+            if (stageManager.CurrentStageIndex == 0)
+            {
+                idleTime = 0f;
+                return;
+            }
+
+            // 入力検出（キーボード or マウス移動）
+            if (inputService.IsAnyGameKeyPressed() || inputService.HasMouseMoved())
+            {
+                idleTime = 0f;
+            }
+            else
+            {
+                idleTime += deltaTime;
+                if (idleTime >= IDLE_TIMEOUT_SECONDS)
+                {
+                    logger.LogInfo($"Idle timeout reached ({IDLE_TIMEOUT_SECONDS}s), returning to title", SystemName);
+                    idleTime = 0f;
+                    stageManager.ToTitleStage();
+                }
             }
         }
 
