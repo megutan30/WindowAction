@@ -6,6 +6,7 @@ using MultiWindowActionGame.Core;
 using MultiWindowActionGame.Utilities;
 using System.Diagnostics;
 using System.Numerics;
+using System.Diagnostics.Tracing;
 
 namespace MultiWindowActionGame.Core
 {
@@ -548,33 +549,33 @@ namespace MultiWindowActionGame.Core
                 RetryButtonPosition = new Point(369, 113),
             });
 
-            //デスクトップアイコン
-            stages.Add(new StageData
-            {
-                Windows = new List<(WindowType type, Point location, Size size, string? text)>
-            {
-                (WindowType.Minimizable, new Point(250, 750), new Size(375, 250),null),
-                (WindowType.TextDisplay, new Point(625, 463), new Size(575, 125), "Stage21 DeskTopIcon"),
-            },
-                GoalPosition = new Point(1750, 125),
-                GoalInFront = true,
-                PlayerStartPosition = new Point(375, 875),
+            ////デスクトップアイコン
+            //stages.Add(new StageData
+            //{
+            //    Windows = new List<(WindowType type, Point location, Size size, string? text)>
+            //{
+            //    (WindowType.Minimizable, new Point(250, 750), new Size(375, 250),null),
+            //    (WindowType.TextDisplay, new Point(625, 463), new Size(575, 125), "Stage21 DeskTopIcon"),
+            //},
+            //    GoalPosition = new Point(1750, 125),
+            //    GoalInFront = true,
+            //    PlayerStartPosition = new Point(375, 875),
 
-                ToTitaleButtonPosition = new Point(106, 113),
-                RetryButtonPosition = new Point(369, 113),
-                EnableDesktopIcons = true,
-            });
+            //    ToTitaleButtonPosition = new Point(106, 113),
+            //    RetryButtonPosition = new Point(369, 113),
+            //    EnableDesktopIcons = true,
+            //});
             //クリア画面
             stages.Add(new StageData
             {
                 Windows = new List<(WindowType type, Point location, Size size, string? text)>
             {
                 (WindowType.NormalBlack, new Point(625, 750), new Size(625, 188),null),
-                (WindowType.TextDisplay, new Point(250, 563), new Size(500, 250),"Game"),
-                (WindowType.TextDisplay, new Point(1125, 563), new Size(500, 250),"Clear"),
-                (WindowType.NormalBlack, new Point(250, 375), new Size(500, 250),null),
-                (WindowType.NormalBlack, new Point(1125, 375), new Size(500, 250),null),
-                (WindowType.TextDisplay, new Point(625, 150), new Size(625, 313), "Thank you!!"),
+                (WindowType.TextDisplay, new Point(250, 563), new Size(500, 250),"Crated by"),
+                (WindowType.TextDisplay, new Point(1125, 563), new Size(500, 250),"Megutan"),
+                (WindowType.TextDisplay, new Point(250, 375), new Size(500, 250),"Thank"),
+                (WindowType.TextDisplay, new Point(1125, 375), new Size(500, 250),"You!!"),
+                (WindowType.TextDisplay, new Point(625, 150), new Size(625, 313), "Game Clear!!"),
                 // 必要に応じて他のウィンドウを追加
             },
                 PlayerStartPosition = new Point(913, 813),

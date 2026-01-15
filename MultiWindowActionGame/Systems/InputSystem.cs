@@ -38,14 +38,14 @@ namespace MultiWindowActionGame.Core.Systems
                 HandleGlobalInput();
 
                 // Debug input
-                if (inputService.IsKeyDown(Keys.F3))
-                {
-                    mainGame.ToggleDebugMode();
-                    logger.LogDebug($"Debug mode toggled (now: {mainGame.IsDebugMode})", SystemName);
+                //if (inputService.IsKeyDown(Keys.F3))
+                //{
+                //    mainGame.ToggleDebugMode();
+                //    logger.LogDebug($"Debug mode toggled (now: {mainGame.IsDebugMode})", SystemName);
 
-                    // Small delay to prevent rapid toggling
-                    await Task.Delay(200);
-                }
+                //    // Small delay to prevent rapid toggling
+                //    await Task.Delay(200);
+                //}
 
                 // Settings input
                 if (inputService.IsKeyDown(Keys.F1))
