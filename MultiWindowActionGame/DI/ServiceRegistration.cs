@@ -17,28 +17,28 @@ namespace MultiWindowActionGame.DI
     {
         public static void RegisterServices(IServiceContainer container)
         {
-            // Register the container itself (for factories that need to resolve dependencies)
+            // コンテナ自身を登録する（依存関係を解決する必要があるファクトリー用）
             container.RegisterSingleton<IServiceContainer>(container);
 
-            // Register core services first
+            // コアサービスを最初に登録する
             RegisterCoreServices(container);
 
-            // Register managers as singletons
+            // マネージャーをシングルトンとして登録する
             RegisterManagers(container);
 
-            // Register main game services early (provides IWindowManager for NoEntry services)
+            // メインゲームサービスを早期に登録する（NoEntryサービスにIWindowManagerを提供）
             RegisterGameServices(container);
 
-            // Register utility services (NoEntryZone services depend on IWindowManager)
+            // ユーティリティサービスを登録する（NoEntryZoneサービスはIWindowManagerに依存）
             RegisterUtilityServices(container);
 
-            // Register game settings (depends on NotificationService)
+            // ゲーム設定を登録する（NotificationServiceに依存）
             RegisterGameSettings(container);
 
-            // Register player components as transient (created per PlayerForm)
+            // プレイヤーコンポーネントをトランジェントとして登録する（PlayerFormごとに生成）
             RegisterPlayerComponents(container);
 
-            // Register system management
+            // システム管理を登録する
             RegisterSystemManagement(container);
         }
 
@@ -53,7 +53,7 @@ namespace MultiWindowActionGame.DI
             container.RegisterSingleton<ILogger>(new NullLogger());
 #endif
 
-            // Register error handling (depends on logger)
+            // エラーハンドリングを登録する（ロガーに依存）
             container.RegisterSingleton<IErrorHandler, ErrorHandler>();
         }
 
@@ -81,13 +81,13 @@ namespace MultiWindowActionGame.DI
             container.RegisterTransient<IPlayerInputHandler, PlayerInputHandler>();
             container.RegisterTransient<IPlayerStateMachine, PlayerStateMachine>();
 
-            // PlayerForm factory for creating instances with specific positions
+            // 特定の位置でインスタンスを生成するPlayerFormファクトリー
             container.RegisterSingleton<IPlayerFormFactory, PlayerFormFactory>();
 
-            // UI button factory for creating button instances
+            // ボタンインスタンスを生成するUIボタンファクトリー
             container.RegisterSingleton<IButtonFactory, ButtonFactory>();
 
-            // Window factory for creating window instances
+            // ウィンドウインスタンスを生成するウィンドウファクトリー
             container.RegisterSingleton<IWindowFactory, WindowFactory>();
         }
 
@@ -95,7 +95,7 @@ namespace MultiWindowActionGame.DI
         {
             container.RegisterSingleton<IGameSettings, GameSettings>();
             
-            // Note: Individual settings objects will be resolved from IGameSettings
+            // 注意: 個別の設定オブジェクトはIGameSettingsから解決される
             // container.RegisterSingleton(gameSettings.Player);
             // container.RegisterSingleton(gameSettings.Window);
             // container.RegisterSingleton(gameSettings.Gameplay);
@@ -103,21 +103,21 @@ namespace MultiWindowActionGame.DI
 
         private static void RegisterUtilityServices(IServiceContainer container)
         {
-            // NoEntry services (depend on IWindowManager)
+            // NoEntryサービス（IWindowManagerに依存）
             container.RegisterSingleton<ZOrderVisibilityService, ZOrderVisibilityService>();
             container.RegisterSingleton<NoEntryBoundaryCollider, NoEntryBoundaryCollider>();
             container.RegisterSingleton<INoEntryZoneManager, NoEntryZoneManager>();
 
-            // Collision services (depend on NoEntry services)
+            // 衝突判定サービス（NoEntryサービスに依存）
             container.RegisterSingleton<ZOrderCollisionHelper, ZOrderCollisionHelper>();
             container.RegisterSingleton<CollisionValidator, CollisionValidator>();
             container.RegisterSingleton<ICollisionService, CollisionService>();
 
-            // Other managers
+            // その他のマネージャー
             container.RegisterSingleton<IWindowEffectManager, WindowEffectManager>();
             container.RegisterSingleton<IPerformanceMonitor, PerformanceMonitor>();
 
-            // New service implementations
+            // 新しいサービス実装
             container.RegisterSingleton<IInputService, InputService>();
             container.RegisterSingleton<IGameTimeService, GameTimeService>();
             container.RegisterSingleton<INotificationService, NotificationService>();

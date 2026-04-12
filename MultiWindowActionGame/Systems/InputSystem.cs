@@ -34,27 +34,27 @@ namespace MultiWindowActionGame.Core.Systems
         {
             try
             {
-                // Global input handling
+                // グローバル入力の処理
                 HandleGlobalInput();
 
-                // Debug input
+                // デバッグ入力
                 if (inputService.IsKeyDown(Keys.F3))
                 {
                     mainGame.ToggleDebugMode();
                     logger.LogDebug($"Debug mode toggled (now: {mainGame.IsDebugMode})", SystemName);
 
-                    // Small delay to prevent rapid toggling
+                    // 連続トグルを防ぐための小さな遅延
                     await Task.Delay(200);
                 }
 
-                // Settings input
+                // 設定入力
                 if (inputService.IsKeyDown(Keys.F1))
                 {
                     logger.LogInfo("Settings screen requested", SystemName);
-                    // Could trigger settings display
+                    // 設定画面の表示をトリガーできる
                 }
 
-                // Player input is handled by PlayerInputHandler component
+                // プレイヤー入力はPlayerInputHandlerコンポーネントで処理される
 
             }
             catch (Exception ex)
@@ -65,16 +65,16 @@ namespace MultiWindowActionGame.Core.Systems
 
         private void HandleGlobalInput()
         {
-            // Handle system-wide input that doesn't belong to specific entities
+            // 特定のエンティティに属さないシステム全体の入力を処理する
 
-            // Window management shortcuts
+            // ウィンドウ管理ショートカット
             if (inputService.IsKeyDown(Keys.F11))
             {
                 logger.LogDebug("Window management toggle requested", SystemName);
-                // Could toggle window borders, etc.
+                // ウィンドウボーダーなどをトグルできる
             }
 
-            // Emergency exit
+            // 緊急終了
             if (inputService.IsKeyDown(Keys.Escape) && inputService.IsKeyDown(Keys.LShiftKey))
             {
                 logger.LogWarning("Emergency exit requested", null, SystemName);

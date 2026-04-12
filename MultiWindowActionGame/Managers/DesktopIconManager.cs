@@ -163,8 +163,8 @@ namespace MultiWindowActionGame.Managers
         private const int SM_CYSMICON = 50; // 小さいアイコンの高さ
 
         // DPI関連定数
-        private const int LOGPIXELSX = 88; // Logical pixels/inch in X
-        private const int LOGPIXELSY = 90; // Logical pixels/inch in Y
+        private const int LOGPIXELSX = 88; // X方向の1インチあたりの論理ピクセル数
+        private const int LOGPIXELSY = 90; // Y方向の1インチあたりの論理ピクセル数
 
         // 作業領域取得用API
         [DllImport("user32.dll")]
@@ -878,10 +878,10 @@ namespace MultiWindowActionGame.Managers
 
         private static bool IsDirectionalCharacter(char c)
         {
-            return (c >= 0x200E && c <= 0x200F) || // LTR/RTL Mark
-                   (c >= 0x202A && c <= 0x202E) || // Directional Embedding/Override
-                   (c >= 0x2066 && c <= 0x2069) || // Directional Isolate
-                   (c == 0x061C);                   // Arabic Letter Mark
+            return (c >= 0x200E && c <= 0x200F) || // LTR/RTLマーク
+                   (c >= 0x202A && c <= 0x202E) || // 方向埋め込み/オーバーライド
+                   (c >= 0x2066 && c <= 0x2069) || // 方向アイソレート
+                   (c == 0x061C);                   // アラビア文字マーク
         }
 
         private List<DesktopIcon> CreateDummyIcons()
@@ -1568,10 +1568,10 @@ namespace MultiWindowActionGame.Managers
             foreach (char c in text)
             {
                 // Unicode方向制御文字を除去
-                if (c >= 0x200E && c <= 0x200F) continue; // LTR/RTL Mark
-                if (c >= 0x202A && c <= 0x202E) continue; // Directional Embedding/Override
-                if (c >= 0x2066 && c <= 0x2069) continue; // Directional Isolate
-                if (c == 0x061C) continue; // Arabic Letter Mark
+                if (c >= 0x200E && c <= 0x200F) continue; // LTR/RTLマーク
+                if (c >= 0x202A && c <= 0x202E) continue; // 方向埋め込み/オーバーライド
+                if (c >= 0x2066 && c <= 0x2069) continue; // 方向アイソレート
+                if (c == 0x061C) continue; // アラビア文字マーク
 
                 result.Append(c);
             }

@@ -67,19 +67,19 @@ namespace MultiWindowActionGame.Core.Systems
         {
             try
             {
-                // Store deltaTime for performance info rendering
+                // パフォーマンス情報描画のためにdeltaTimeを保存する
                 lastDeltaTime = deltaTime;
 
-                // Update notifications
+                // 通知を更新する
                 notificationService?.Update(deltaTime);
 
                 // NoEntryウィンドウのボーダーアニメーションを更新
                 OutlineRenderer.UpdateAnimation(deltaTime);
 
-                // Update FPS counter
+                // FPSカウンターを更新する
                 UpdateFPSCounter(deltaTime);
 
-                // Perform rendering
+                // レンダリングを実行する
                 await RenderFrame();
             }
             catch (Exception ex)
@@ -99,22 +99,22 @@ namespace MultiWindowActionGame.Core.Systems
                 }
 
                 Graphics g = graphicsBuffer.Graphics;
-                
+
                 try
                 {
-                    // Clear the screen
+                    // 画面をクリアする
                     g.Clear(Color.Transparent);
 
-                    // Render game elements in order
+                    // ゲーム要素を順番にレンダリングする
                     await RenderGameElements(g);
-                    
-                    // Render UI elements
+
+                    // UI要素をレンダリングする
                     RenderUI(g);
-                    
-                    // Present the frame
+
+                    // フレームを表示する
                     graphicsBuffer.Render();
-                    
-                    // Update window displays
+
+                    // ウィンドウ表示を更新する
                     windowManager.UpdateDisplay();
                     
                     frameCount++;
@@ -132,19 +132,19 @@ namespace MultiWindowActionGame.Core.Systems
         {
             try
             {
-                // Render stage elements (goals, etc.)
+                // ステージ要素（ゴールなど）をレンダリングする
                 stageManager.CurrentGoal?.Draw(g);
 
-                // Render no-entry zones
+                // 不可侵領域をレンダリングする
                 GetNoEntryZoneManagerSafely().Draw(g);
 
-                // Render windows and game objects
+                // ウィンドウとゲームオブジェクトをレンダリングする
                 windowManager.Draw(g);
 
-                // Render desktop icon collision bounds (if enabled for current stage)
+                // デスクトップアイコン衝突境界をレンダリングする（現在のステージで有効な場合）
                 RenderDesktopIconCollisionBounds(g);
 
-                // Render window marks/indicators
+                // ウィンドウマーク・インジケーターをレンダリングする
                 if (MainGame.IsDebugMode)
                 {
                     windowManager.DrawMarks(g);
@@ -162,16 +162,16 @@ namespace MultiWindowActionGame.Core.Systems
         {
             try
             {
-                // Render debug information
+                // デバッグ情報をレンダリングする
                 if (MainGame.IsDebugMode)
                 {
                     RenderDebugInfo(g);
                 }
 
-                // Render settings notifications
+                // 設定通知をレンダリングする
                 notificationService?.Draw(g);
 
-                // Render performance info
+                // パフォーマンス情報をレンダリングする
                 if (MainGame.IsDebugMode)
                 {
                     RenderPerformanceInfo(g);
@@ -206,7 +206,7 @@ namespace MultiWindowActionGame.Core.Systems
         {
             try
             {
-                // Performance info rendering - simplified for now
+                // パフォーマンス情報の描画 - 現時点では簡略化
                 using (var font = new Font("Arial", 10))
                 using (var brush = new SolidBrush(Color.Yellow))
                 {
@@ -268,7 +268,7 @@ namespace MultiWindowActionGame.Core.Systems
         protected override void OnResume()
         {
             logger.LogInfo("Rendering resumed", SystemName);
-            // Reset FPS counter after pause
+            // 一時停止後にFPSカウンターをリセットする
             frameCount = 0;
             fpsTimer = 0f;
         }

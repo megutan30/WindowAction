@@ -56,11 +56,11 @@ namespace MultiWindowActionGame.Windows
             this.windowManager = windowManager;
             this.boundaryCollider = boundaryCollider;
 
-            // Fallback to static reference for backward compatibility
+            // 後方互換性のために静的参照にフォールバックする
             settings = gameSettings?.Window ?? GameSettings.Current.Window;
         }
 
-        // 基本実装を提供するメソッド
+        // 基本実装を提供するメソッド（派生クラスでオーバーライド可能）
         public virtual void Update(GameWindow window, float deltaTime) { }
         public virtual void HandleInput(GameWindow window) { }
         public virtual void HandleResize(GameWindow window)
@@ -90,18 +90,18 @@ namespace MultiWindowActionGame.Windows
                     break;
             }
         }
-        // 新しい共通メソッド
+        // 共通の仮想メソッド
         protected virtual void OnMouseDown(GameWindow window) { }
         protected virtual void OnMouseUp(GameWindow window) { }
         protected virtual void OnMouseMove(GameWindow window) { }
 
-        // カーソル管理の共通実装
+        // カーソル管理の共通実装（派生クラスでオーバーライド可能）
         public virtual void UpdateCursor(GameWindow window, Point clientMousePos)
         {
             window.Cursor = GetStrategyCursor();
         }
 
-        // 各ストラテジーで実装が必要なメソッド
+        // 各ストラテジーで実装が必要な抽象メソッド
         public abstract void DrawStrategyMark(Graphics g, Rectangle bounds, bool isHovered);
         protected abstract Cursor GetStrategyCursor();
 
@@ -743,7 +743,7 @@ namespace MultiWindowActionGame.Windows
                 bounds.Height
             );
 
-            // CollisionService or fallback to ZoneManager
+            // CollisionServiceまたはZoneManagerへのフォールバック
             return CheckCollision(window, checkBounds);
         }
         public override void HandleWindowMessage(GameWindow window, Message m)

@@ -16,7 +16,7 @@ namespace MultiWindowActionGame
         private const uint SWP_NOMOVE = 0x0002;
         private const uint SWP_NOSIZE = 0x0001;
 
-        // Z-order の優先順位
+        // Z-orderの優先順位
         public enum ZOrderPriority
         {
             DebugLayer = 6,

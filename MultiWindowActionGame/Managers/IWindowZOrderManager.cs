@@ -27,7 +27,7 @@ namespace MultiWindowActionGame.Managers
         IReadOnlyList<GameButton> GetAllButtons();
         IReadOnlyDictionary<ZOrderPriority, IReadOnlyList<Form>> GetFormsByPriority();
 
-        // Z-order比較メソッド
+        // Z-order比較メソッド群
         int CompareWindowZOrder(GameWindow window1, GameWindow window2, IReadOnlyList<GameWindow> allWindows);
         int GetWindowZIndex(GameWindow window, IReadOnlyList<GameWindow> allWindows);
         bool IsWindowInFront(GameWindow window1, GameWindow window2, IReadOnlyList<GameWindow> allWindows);

@@ -47,7 +47,7 @@ namespace MultiWindowActionGame.Player
         }
     }
 
-    // Individual state implementations
+    // 各ステートの実装
     public class NormalPlayerState : IPlayerState
     {
         public PlayerStateType StateType => PlayerStateType.Normal;
@@ -57,12 +57,12 @@ namespace MultiWindowActionGame.Player
 
         public void Update(float deltaTime)
         {
-            // Normal state logic
+            // 通常ステートのロジック
         }
 
         public void Draw(Graphics g, Rectangle bounds)
         {
-            // Normal state drawing - basic blue rectangle is drawn by PlayerForm
+            // 通常ステートの描画 - 基本的な青い矩形はPlayerFormで描画される
         }
     }
 
@@ -75,7 +75,7 @@ namespace MultiWindowActionGame.Player
 
         public void Update(float deltaTime)
         {
-            // Jumping state logic
+            // ジャンプステートのロジック
         }
 
         public void Draw(Graphics g, Rectangle bounds)
@@ -93,7 +93,7 @@ namespace MultiWindowActionGame.Player
 
         public void Update(float deltaTime)
         {
-            // Falling state logic
+            // 落下ステートのロジック
         }
 
         public void Draw(Graphics g, Rectangle bounds)
@@ -111,7 +111,7 @@ namespace MultiWindowActionGame.Player
 
         public void Update(float deltaTime)
         {
-            // Grounded state logic
+            // 接地ステートのロジック
         }
 
         public void Draw(Graphics g, Rectangle bounds)

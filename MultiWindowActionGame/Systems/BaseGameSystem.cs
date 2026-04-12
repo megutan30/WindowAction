@@ -87,29 +87,29 @@ namespace MultiWindowActionGame.Core.Systems
 
         protected virtual async Task OnInitializeAsync()
         {
-            // Override in derived classes
+            // 派生クラスでオーバーライドする
             await Task.CompletedTask;
         }
 
         protected virtual async Task OnUpdateAsync(float deltaTime)
         {
-            // Override in derived classes
+            // 派生クラスでオーバーライドする
             await Task.CompletedTask;
         }
 
         protected virtual void OnShutdown()
         {
-            // Override in derived classes
+            // 派生クラスでオーバーライドする
         }
 
         protected virtual void OnPause()
         {
-            // Override in derived classes
+            // 派生クラスでオーバーライドする
         }
 
         protected virtual void OnResume()
         {
-            // Override in derived classes
+            // 派生クラスでオーバーライドする
         }
     }
 }

@@ -18,10 +18,10 @@ namespace MultiWindowActionGame.Core
 
         public void HandleError(IGameError error)
         {
-            // Log the error
+            // エラーをログに記録する
             logger.LogError(error.Message, error.Exception, error.Context);
 
-            // Try recovery if exception exists
+            // 例外が存在する場合は回復を試みる
             if (error.Exception != null && recoveryActions.TryGetValue(error.Exception.GetType(), out var recovery))
             {
                 try
@@ -35,7 +35,7 @@ namespace MultiWindowActionGame.Core
                 }
             }
 
-            // Handle based on severity
+            // 深刻度に基づいて処理する
             HandleBySeverity(error);
         }
 
@@ -86,11 +86,11 @@ namespace MultiWindowActionGame.Core
             switch (error.Severity)
             {
                 case ErrorSeverity.Low:
-                    // Just log, don't interrupt
+                    // ログに記録するだけで処理を中断しない
                     break;
 
                 case ErrorSeverity.Medium:
-                    // Log and potentially show debug info
+                    // ログに記録し、デバッグ情報を表示する可能性がある
                     if (MainGame.IsDebugMode)
                     {
                         Console.WriteLine($"Error: {error.Message}");
@@ -98,16 +98,16 @@ namespace MultiWindowActionGame.Core
                     break;
 
                 case ErrorSeverity.High:
-                    // Show user notification but continue
+                    // ユーザーに通知するが処理を継続する
                     if (Program.mainForm != null && !Program.mainForm.InvokeRequired)
                     {
-                        // Could show a non-blocking notification
+                        // ノンブロッキング通知を表示できる
                         Console.WriteLine($"High severity error occurred: {error.Message}");
                     }
                     break;
 
                 case ErrorSeverity.Critical:
-                    // Critical error - might need to shutdown gracefully
+                    // 致命的エラー - グレースフルシャットダウンが必要な場合がある
                     logger.LogCritical($"CRITICAL ERROR: {error.Message}", error.Exception, error.Context);
 
                     if (Program.mainForm != null)

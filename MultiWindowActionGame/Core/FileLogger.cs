@@ -60,14 +60,14 @@ namespace MultiWindowActionGame.Core
                         }
                     }
 
-                    // Also output to debug console
+                    // デバッグコンソールにも出力する
                     if (exception != null)
                     {
                     }
                 }
                 catch (Exception ex)
                 {
-                    // Fallback to debug output if file logging fails
+                    // ファイルログが失敗した場合はデバッグ出力にフォールバックする
                 }
             }
         }

@@ -34,7 +34,7 @@ namespace MultiWindowActionGame.Core.Systems
 
                 systems.Add(system);
                 
-                // Sort by priority
+                // 優先度順にソートする
                 systems.Sort((a, b) => a.Priority.CompareTo(b.Priority));
                 
                 logger.LogInfo($"Registered system: {system.SystemName} (Priority: {system.Priority})", "SystemManager");
@@ -97,7 +97,7 @@ namespace MultiWindowActionGame.Core.Systems
                     errorHandler.HandleError($"Failed to initialize system {system.SystemName}", 
                         ErrorSeverity.High, ex, "SystemManager");
                     
-                    // For critical systems, we might want to stop initialization
+                    // 重要なシステムの場合、初期化を停止する必要がある場合がある
                     if (!errorHandler.ShouldContinue(ErrorSeverity.High))
                     {
                         throw;
@@ -122,7 +122,7 @@ namespace MultiWindowActionGame.Core.Systems
         {
             logger.LogInfo("Shutting down all systems", "SystemManager");
             
-            var systemsCopy = GetAllSystems().Reverse().ToList(); // Shutdown in reverse order
+            var systemsCopy = GetAllSystems().Reverse().ToList(); // 逆順でシャットダウンする
             
             foreach (var system in systemsCopy)
             {

@@ -181,7 +181,7 @@ namespace MultiWindowActionGame.UI
         }
         private void UpdateSettings()
         {
-            // Player settings
+            // プレイヤー設定
             settings.Player.MovementSpeed = (float)settingControls["Movement Speed"].Value;
             settings.Player.Gravity = (float)settingControls["Gravity"].Value;
             settings.Player.JumpForce = (float)settingControls["Jump Force"].Value;
@@ -190,13 +190,13 @@ namespace MultiWindowActionGame.UI
                 (int)settingControls["Default Height"].Value
             );
 
-            // Window settings
+            // ウィンドウ設定
             settings.Window.MinimumSize = new Size(
                 (int)settingControls["Min Width"].Value,
                 (int)settingControls["Min Height"].Value
             );
 
-            // Gameplay settings
+            // ゲームプレイ設定
             settings.Gameplay.TargetFPS = (int)settingControls["Target FPS"].Value;
             settings.Gameplay.WindowSnapDistance = (float)settingControls["Snap Distance"].Value;
         }

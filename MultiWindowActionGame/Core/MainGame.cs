@@ -114,13 +114,13 @@ namespace MultiWindowActionGame.Core
             return player;
         }
         
-        // Instance method for DI usage
+        // DI用インスタンスメソッド
         public PlayerForm? GetPlayerInstance()
         {
             return player;
         }
 
-        // Static method for legacy compatibility
+        // 後方互換性のための静的メソッド
         public static PlayerForm? GetPlayer()
         {
             return Current.player;

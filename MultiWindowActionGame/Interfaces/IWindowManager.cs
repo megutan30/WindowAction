@@ -31,28 +31,28 @@ namespace MultiWindowActionGame.Interfaces
 
         Region CalculateMovableRegion(GameWindow? currentWindow);
 
-        // Z-order management
+        // Z-order管理
         void RegisterFormOrder(Form form, MultiWindowActionGame.Managers.ZOrderPriority priority);
         void UnregisterFormOrder(Form form);
         void UpdateFormZOrder(Form form, MultiWindowActionGame.Managers.ZOrderPriority priority);
         void BringWindowToFront(GameWindow window);
 
-        // Collision detection
+        // 衝突判定
         List<GameWindow> GetIntersectingWindows(Rectangle bounds);
         GameWindow? GetWindowAt(Rectangle bounds, GameWindow? currentWindow = null);
         GameWindow? GetTopWindowAt(Rectangle bounds, GameWindow? currentWindow);
         GameWindow? GetWindowFullyContaining(Rectangle bounds);
         GameWindow? GetNearestWindow(Rectangle bounds);
 
-        // Hierarchy management  
+        // 階層管理
         GameWindow? GetParentWindow(IEffectTarget child);
         HashSet<IEffectTarget> GetContainedTargets(GameWindow window);
         void CheckPotentialParentWindow(GameWindow operatedWindow);
 
-        // Observer pattern
+        // オブザーバーパターン
         void OnWindowChanged(GameWindow window, WindowChangeType changeType);
 
-        // Z-order utilities
+        // Z-orderユーティリティ
         int GetWindowZIndex(GameWindow window);
         void UpdateWindowGroupZOrder();
     }
