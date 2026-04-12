@@ -4,6 +4,7 @@ using MultiWindowActionGame.Utilities;
 using MultiWindowActionGame.Windows;
 using MultiWindowActionGame.Debug;
 using MultiWindowActionGame.Managers;
+using MultiWindowActionGame.Rendering;
 using System;
 using System.Drawing;
 using System.Threading.Tasks;
@@ -71,6 +72,9 @@ namespace MultiWindowActionGame.Core.Systems
 
                 // Update notifications
                 notificationService?.Update(deltaTime);
+
+                // NoEntryウィンドウのボーダーアニメーションを更新
+                OutlineRenderer.UpdateAnimation(deltaTime);
 
                 // Update FPS counter
                 UpdateFPSCounter(deltaTime);
