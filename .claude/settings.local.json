@@ -29,7 +29,14 @@
       "Bash(dotnet list:*)",
       "Bash(dotnet restore:*)",
       "Bash(dotnet --version:*)",
-      "Bash(dotnet sdk:*)"
+      "Bash(dotnet sdk:*)",
+      "Bash(Get-ChildItem -Path \"D:\\\\DevelopProject\\\\WindowAction\\\\MultiWindowActionGame\" -Directory)",
+      "Bash(Select-Object Name)",
+      "Bash(Sort-Object Name)",
+      "Bash(Get-Content \"D:\\\\DevelopProject\\\\WindowAction\\\\docs\\\\SPECIFICATION.md\")",
+      "Bash(Measure-Object -Line)",
+      "Bash(Select-Object -ExpandProperty Lines)",
+      "PowerShell(\\(Get-Content \"D:\\\\DevelopProject\\\\WindowAction\\\\docs\\\\SPECIFICATION.md\" | Measure-Object -Line\\).Lines)"
     ],
     "deny": []
   }
