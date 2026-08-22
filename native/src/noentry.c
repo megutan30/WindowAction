@@ -1,0 +1,226 @@
+#include "noentry.h"
+#include "gamewindow.h"
+#include "zorder.h"
+
+#define NOENTRY_BOUNDARY_WIDTH 5
+#define ZONE_STRIPE_WIDTH 20
+#define ZONE_PATTERN_HEIGHT (ZONE_STRIPE_WIDTH * 2)
+
+static int RectsOverlap(RECT a, RECT b)
+{
+    return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+}
+
+static const char *kZoneWindowClass = "WA_NoEntryZone";
+static HWND g_zoneHwnd[MAX_NOENTRY_ZONES];
+static float g_zoneAnimOffset = 0.0f;
+
+static void PaintZone(HWND hwnd)
+{
+    PAINTSTRUCT ps;
+    HDC hdc = BeginPaint(hwnd, &ps);
+    RECT rc;
+    GetClientRect(hwnd, &rc);
+
+    HDC memDC = CreateCompatibleDC(hdc);
+    HBITMAP memBmp = CreateCompatibleBitmap(hdc, rc.right - rc.left, rc.bottom - rc.top);
+    HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, memBmp);
+
+    /* NoEntryZone_Paint: 幅STRIPE_WIDTH=20の水平帯を、FromArgb(180,Red)と
+       FromArgb(180,Black)で交互に下方向へスクロールさせる。GDIには任意の
+       背景に対する安価なピクセル単位のアルファ合成手段がないため、
+       これらは元の半透明色を単色で近似したもの。 */
+    int startY = -((int)g_zoneAnimOffset % ZONE_PATTERN_HEIGHT);
+    HBRUSH redBrush = CreateSolidBrush(RGB(220, 50, 50));
+    HBRUSH darkBrush = CreateSolidBrush(RGB(50, 50, 50));
+    for (int y = startY; y < rc.bottom + ZONE_PATTERN_HEIGHT; y += ZONE_PATTERN_HEIGHT)
+    {
+        RECT red = {rc.left, y, rc.right, y + ZONE_STRIPE_WIDTH};
+        RECT dark = {rc.left, y + ZONE_STRIPE_WIDTH, rc.right, y + ZONE_PATTERN_HEIGHT};
+        FillRect(memDC, &red, redBrush);
+        FillRect(memDC, &dark, darkBrush);
+    }
+    DeleteObject(redBrush);
+    DeleteObject(darkBrush);
+
+    BitBlt(hdc, 0, 0, rc.right - rc.left, rc.bottom - rc.top, memDC, 0, 0, SRCCOPY);
+    SelectObject(memDC, oldBmp);
+    DeleteObject(memBmp);
+    DeleteDC(memDC);
+
+    EndPaint(hwnd, &ps);
+}
+
+static LRESULT CALLBACK ZoneWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    switch (msg)
+    {
+    case WM_PAINT:
+        PaintZone(hwnd);
+        return 0;
+    case WM_ERASEBKGND:
+        return 1;
+    }
+    return DefWindowProcA(hwnd, msg, wParam, lParam);
+}
+
+void NoEntry_RegisterWindowClass(HINSTANCE hInstance)
+{
+    WNDCLASSA wc;
+    ZeroMemory(&wc, sizeof(wc));
+    wc.lpfnWndProc = ZoneWindowProc;
+    wc.hInstance = hInstance;
+    wc.lpszClassName = kZoneWindowClass;
+    wc.hCursor = LoadCursorA(NULL, (LPCSTR)IDC_ARROW);
+    wc.hbrBackground = NULL;
+    RegisterClassA(&wc);
+}
+
+void NoEntry_AddZone(HINSTANCE hInstance, int x, int y, int w, int h)
+{
+    if (g_noEntryZoneCount >= MAX_NOENTRY_ZONES)
+        return;
+    RECT r = {x, y, x + w, y + h};
+    int idx = g_noEntryZoneCount;
+    g_noEntryZones[g_noEntryZoneCount++] = r;
+
+    /* WS_EX_TRANSPARENT（クリックスルー）+ WS_EX_TOPMOSTは、NoEntryZone.csの
+       SetWindowPropertiesと厳密に一致。 */
+    HWND hwnd = CreateWindowExA(
+        WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST, kZoneWindowClass, "NoEntryZone",
+        WS_POPUP | WS_VISIBLE,
+        x, y, w, h,
+        NULL, NULL, hInstance, NULL);
+
+    if (hwnd)
+    {
+        SetLayeredWindowAttributes(hwnd, RGB(255, 0, 255), 0, LWA_COLORKEY);
+        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+    g_zoneHwnd[idx] = hwnd;
+}
+
+void NoEntry_ResetZones(void)
+{
+    for (int i = 0; i < g_noEntryZoneCount; i++)
+    {
+        if (g_zoneHwnd[i])
+            DestroyWindow(g_zoneHwnd[i]);
+        g_zoneHwnd[i] = NULL;
+    }
+    g_noEntryZoneCount = 0;
+}
+
+void NoEntry_UpdateAnimation(float dt)
+{
+    const float SPEED = 40.0f; /* px/sec、現行のOutlineRendererと一致 */
+    for (int i = 0; i < g_windowCount; i++)
+    {
+        if (g_windows[i].isNoEntry)
+            g_windows[i].stripeOffset += SPEED * dt;
+    }
+
+    g_zoneAnimOffset += SPEED * dt;
+    for (int i = 0; i < g_noEntryZoneCount; i++)
+    {
+        if (g_zoneHwnd[i])
+            InvalidateRect(g_zoneHwnd[i], NULL, FALSE);
+    }
+}
+
+int NoEntry_GetBoundaryRects(int windowIndex, RECT out[4])
+{
+    GameWindowData *data = GetWindowData(windowIndex);
+    if (!data || !data->isNoEntry || !data->hwnd || data->minimized)
+        return 0;
+
+    RECT b;
+    GetWindowFullBounds(data->hwnd, &b);
+    int bw = NOENTRY_BOUNDARY_WIDTH;
+
+    out[0] = (RECT){b.left, b.top, b.right, b.top + bw};                 /* 上 */
+    out[1] = (RECT){b.left, b.bottom - bw, b.right, b.bottom};           /* 下 */
+    out[2] = (RECT){b.left, b.top, b.left + bw, b.bottom};               /* 左 */
+    out[3] = (RECT){b.right - bw, b.top, b.right, b.bottom};             /* 右 */
+    return 4;
+}
+
+int NoEntry_IsRectVisibleFromWindow(int windowIndex, RECT rect)
+{
+    HWND hwnd = g_windows[windowIndex].hwnd;
+    if (!hwnd || IsRectEmpty(&rect))
+        return 0;
+
+    int myZ = ZOrder_GetIndex(hwnd);
+    HRGN visible = CreateRectRgnIndirect(&rect);
+
+    for (int i = 0; i < g_windowCount; i++)
+    {
+        /* NoEntryBoundaryCollider.CheckCollisionは、他のNoEntryウィンドウに
+           限らず、より前面にある「あらゆる」ウィンドウを除外対象とする --
+           NoEntryウィンドウの境界の手前に置かれた通常ウィンドウも、通常の
+           描画の重なり順（上に描かれたものが下を隠す）と同様にその部分を
+           隠す。ここで対象とするのは、オリジナルのwindowsListが保持するのと
+           同じGameWindow相当の集合のみ: GoalやボタンはそちらではWindowsList
+           とは別に管理されており、遮蔽物にはならない。 */
+        if (i == windowIndex || !IsQueryableWindow(g_windows[i].kind) || !g_windows[i].hwnd || g_windows[i].minimized)
+            continue;
+        if (ZOrder_GetIndex(g_windows[i].hwnd) <= myZ)
+            continue; /* 厳密により前面にあるウィンドウのみが遮蔽できる */
+
+        RECT coverBounds;
+        GetWindowFullBounds(g_windows[i].hwnd, &coverBounds);
+        HRGN coverRgn = CreateRectRgnIndirect(&coverBounds);
+        CombineRgn(visible, visible, coverRgn, RGN_DIFF);
+        DeleteObject(coverRgn);
+    }
+
+    RECT box;
+    int rgnType = GetRgnBox(visible, &box);
+    DeleteObject(visible);
+
+    return rgnType != NULLREGION && rgnType != ERROR;
+}
+
+/* `bounds`がNoEntryウィンドウ`windowIndex`の境界の「可視」部分と重なっていれば
+   true -- すなわち、重なった部分がより前面のNoEntryウィンドウに完全に
+   覆われていない場合。NoEntryBoundaryCollider.CheckCollisionと一致:
+   交差する各境界帯について、checkBounds/境界の交差部分だけを取り出し、
+   その可視性を判定する。 */
+static int IsBoundaryVisible(int windowIndex, RECT bounds)
+{
+    RECT bnd[4];
+    int c = NoEntry_GetBoundaryRects(windowIndex, bnd);
+    if (c == 0)
+        return 0;
+
+    for (int b = 0; b < c; b++)
+    {
+        if (!RectsOverlap(bounds, bnd[b]))
+            continue;
+
+        RECT intersection;
+        if (!IntersectRect(&intersection, &bounds, &bnd[b]))
+            continue;
+
+        if (NoEntry_IsRectVisibleFromWindow(windowIndex, intersection))
+            return 1;
+    }
+    return 0;
+}
+
+int NoEntry_IntersectsAny(RECT bounds)
+{
+    for (int i = 0; i < g_noEntryZoneCount; i++)
+        if (RectsOverlap(bounds, g_noEntryZones[i]))
+            return 1;
+
+    for (int i = 0; i < g_windowCount; i++)
+    {
+        if (!g_windows[i].isNoEntry || !g_windows[i].hwnd || g_windows[i].minimized)
+            continue;
+        if (IsBoundaryVisible(i, bounds))
+            return 1;
+    }
+    return 0;
+}
