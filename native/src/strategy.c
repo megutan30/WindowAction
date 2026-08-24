@@ -2,6 +2,7 @@
 #include "collision.h"
 #include "hierarchy.h"
 #include "player.h"
+#include <stdlib.h>
 
 int g_requestRestart = 0;
 int g_requestNext = 0;
@@ -18,11 +19,22 @@ void Strategy_HandleMouseDown(int index)
     {
     case WT_MOVABLE:
     case WT_MOVABLE_NOENTRY:
+    {
         data->dragging = 1;
         SetCapture(data->hwnd);
-        GetCursorPos(&data->lastMouse);
+        /* window.PointToClient(Cursor.Position)相当: 画面絶対座標そのままでは
+           なく、その時点のウィンドウ左上を基準にした相対座標で記録する
+           （UpdateMovable参照 -- この基準の動的な取り直しが、ドラッグ開始位置
+           からの累積差分を絶対目標位置へ正しく収束させるために必須）。 */
+        POINT curAbs;
+        GetCursorPos(&curAbs);
+        RECT outer0;
+        GetWindowRect(data->hwnd, &outer0);
+        data->lastMouse.x = curAbs.x - outer0.left;
+        data->lastMouse.y = curAbs.y - outer0.top;
         data->blockedL = data->blockedR = data->blockedU = data->blockedD = 0;
         break;
+    }
     case WT_RESIZABLE:
     case WT_RESIZABLE_NOENTRY:
     {
@@ -56,6 +68,31 @@ void Strategy_HandleMouseDown(int index)
     case WT_MINIMIZABLE_NOENTRY:
         SetWindowMinimized(index, !data->minimized);
         break;
+    case WT_UNCONSTRAINED:
+    case WT_UNCONSTRAINED_NOENTRY:
+    {
+        data->resizing = 1;
+        SetCapture(data->hwnd);
+        GetCursorPos(&data->resizeDragStart);
+
+        /* このジェスチャーの基準となる符号付き論理サイズをresizeOrigSizeに
+           退避する（cx/cyはLONGなので負値もそのまま格納できる）。 */
+        data->resizeOrigSize.cx = data->logicalW;
+        data->resizeOrigSize.cy = data->logicalH;
+
+        /* アンカー点（このジェスチャー中ずっと固定される角）を、現在の反転
+           状態から逆算する: 反転していない軸は実ウィンドウの左上そのもの、
+           反転している軸は実ウィンドウの右(下)端がアンカーになる
+           （UpdateUnconstrainedのVisualTopLeft計算と対になる）。 */
+        RECT r;
+        GetWindowRect(data->hwnd, &r);
+        data->unconstrainedAnchor.x = (data->logicalW < 0) ? r.right : r.left;
+        data->unconstrainedAnchor.y = (data->logicalH < 0) ? r.bottom : r.top;
+
+        g_resizeGeneration++;
+        Hierarchy_RecordOriginalSizes(index);
+        break;
+    }
     default:
         break;
     }
@@ -102,24 +139,31 @@ void Strategy_HandleButtonClick(WindowKind kind)
 
 static void UpdateMovable(int index, GameWindowData *data)
 {
-    POINT cur;
-    GetCursorPos(&cur);
+    POINT curAbs;
+    GetCursorPos(&curAbs);
 
     RECT current;
     GetWindowFullBounds(data->hwnd, &current);
 
-    /* MovableWindowStrategy.CalculateMovementと厳密に一致させる: data->lastMouseは
-       Strategy_HandleMouseDownでドラッグ開始時に一度だけ記録され、以後このドラッグ
-       中は更新しない（末尾のdata->lastMouse = cur;を参照 -- 削除済み）。そのため
-       dx/dyは「前フレームからのカーソル移動量」ではなく「ドラッグ開始からの
-       カーソル累積移動量」になる。window.PointToClientがその時点のウィンドウ位置を
-       使って変換する原本の実装では、この累積差分から現在位置の項が代数的に
-       相殺され、結果的に「ドラッグ開始位置 + カーソル累積移動量」という絶対
-       目標位置になる（本関数ではcurrent + dx/dyという形のまま計算するが、
-       algebraically同じ結果になる）。これにより、ある1フレームで衝突により
-       移動が一部しか適用できなくても、次のフレームは常にこの絶対目標へ向けて
-       再計算されるため、カーソルとウィンドウの相対位置がドラッグ中にズレて
-       いくことがない。 */
+    /* MovableWindowStrategy.CalculateMovementと一致させる: window.PointToClient(
+       Cursor.Position)は画面絶対座標を「その時点のウィンドウ現在位置」基準の
+       相対座標に変換する。data->lastMouseはStrategy_HandleMouseDownでドラッグ
+       開始時に一度だけ記録され、以後このドラッグ中は更新しないが、curは毎フレーム
+       ウィンドウの現在位置を基準に取り直す（PointToClientと同じ）ため、
+       「ドラッグ開始位置 + カーソル累積移動量」という絶対目標位置に代数的に
+       収束する:
+         P(t) = P(t-1) + [ (cur(t)-outer(t-1)) - lastMouse ]
+              = P(t-1) + (C(t)-C(0)) - (P(t-1)-P(0))
+              = P(0) + (C(t)-C(0))
+       （outerを画面絶対座標のまま使うと、この P(t-1) の相殺項が失われ、
+       毎フレーム移動量が累積加算されて暴走する -- 実際に発生した回帰バグ）。
+       これにより、ある1フレームで衝突により移動が一部しか適用できなくても、
+       次のフレームは常にこの絶対目標へ向けて再計算されるため、カーソルと
+       ウィンドウの相対位置がドラッグ中にズレていくことがない。 */
+    RECT outerNow;
+    GetWindowRect(data->hwnd, &outerNow);
+    POINT cur = {curAbs.x - outerNow.left, curAbs.y - outerNow.top};
+
     int dx = cur.x - data->lastMouse.x;
     int dy = cur.y - data->lastMouse.y;
 
@@ -272,6 +316,81 @@ static void UpdateResizable(int index, GameWindowData *data)
     }
 }
 
+/* WT_UNCONSTRAINED/WT_UNCONSTRAINED_NOENTRY専用のリサイズ更新。UpdateResizable
+   と違い上限/下限をMIN_WINDOW_SIZE/MAX_WINDOW_SIZEではなく
+   UNCONSTRAINED_MIN_ABS_SIZE/MAX_WINDOW_SIZEにし、論理サイズが0を跨ぐと
+   反転（見た目のミラーのみ、実HWNDは常に正サイズ）する。
+
+   衝突判定は「アンカー点を固定した正方向（右/下）への伸長」としてのみ
+   評価する（logicalCurrent参照）。これは反転中の軸について、アンカーの
+   反対側に既にある障害物を検出できないという既知の制約だが、反転は
+   見た目のみの効果でありプレイヤーの接地判定には影響しないため許容する。 */
+static void UpdateUnconstrained(int index, GameWindowData *data)
+{
+    POINT cur;
+    GetCursorPos(&cur);
+
+    int dx = cur.x - data->resizeDragStart.x;
+    int dy = cur.y - data->resizeDragStart.y;
+
+    int newLogicalW = data->resizeOrigSize.cx + dx;
+    int newLogicalH = data->resizeOrigSize.cy + dy;
+
+    /* 0付近の不感帯: 絶対値がUNCONSTRAINED_MIN_ABS_SIZE未満にならないように
+       符号を保ったままクランプする。これにより実ウィンドウが完全に潰れず、
+       ユーザーがドラッグし続ければ自然に符号が反転する。 */
+    if (newLogicalW >= 0 && newLogicalW < UNCONSTRAINED_MIN_ABS_SIZE)
+        newLogicalW = UNCONSTRAINED_MIN_ABS_SIZE;
+    else if (newLogicalW < 0 && newLogicalW > -UNCONSTRAINED_MIN_ABS_SIZE)
+        newLogicalW = -UNCONSTRAINED_MIN_ABS_SIZE;
+    if (newLogicalH >= 0 && newLogicalH < UNCONSTRAINED_MIN_ABS_SIZE)
+        newLogicalH = UNCONSTRAINED_MIN_ABS_SIZE;
+    else if (newLogicalH < 0 && newLogicalH > -UNCONSTRAINED_MIN_ABS_SIZE)
+        newLogicalH = -UNCONSTRAINED_MIN_ABS_SIZE;
+
+    int flipX = newLogicalW < 0;
+    int flipY = newLogicalH < 0;
+    int absW = abs(newLogicalW);
+    int absH = abs(newLogicalH);
+
+    int prevAbsW = abs(data->logicalW);
+    int prevAbsH = abs(data->logicalH);
+
+    RECT logicalCurrent = {data->unconstrainedAnchor.x, data->unconstrainedAnchor.y,
+                            data->unconstrainedAnchor.x + prevAbsW, data->unconstrainedAnchor.y + prevAbsH};
+
+    CollisionOptions opts;
+    opts.excludeIndex = index;
+    opts.excludeChildren = 1;
+    opts.checkNormalWindows = data->isNoEntry;
+
+    SIZE proposed = {absW, absH};
+    SIZE validated = Collision_ValidateSizeEx(logicalCurrent, proposed, opts,
+                                               UNCONSTRAINED_MIN_ABS_SIZE, MAX_WINDOW_SIZE);
+
+    int visualLeft = flipX ? (data->unconstrainedAnchor.x - validated.cx) : data->unconstrainedAnchor.x;
+    int visualTop = flipY ? (data->unconstrainedAnchor.y - validated.cy) : data->unconstrainedAnchor.y;
+
+    RECT outer;
+    GetWindowRect(data->hwnd, &outer);
+    if (outer.left != visualLeft || outer.top != visualTop ||
+        (outer.right - outer.left) != validated.cx || (outer.bottom - outer.top) != validated.cy)
+    {
+        SetWindowPos(data->hwnd, NULL, visualLeft, visualTop, validated.cx, validated.cy,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+
+        float scaleX = (float)validated.cx / (float)prevAbsW;
+        float scaleY = (float)validated.cy / (float)prevAbsH;
+        Hierarchy_ApplyScale(index, scaleX, scaleY);
+
+        data->logicalW = flipX ? -validated.cx : validated.cx;
+        data->logicalH = flipY ? -validated.cy : validated.cy;
+
+        InvalidateRect(data->hwnd, NULL, FALSE);
+        UpdateWindow(data->hwnd);
+    }
+}
+
 void Strategy_UpdateAll(float dt)
 {
     (void)dt;
@@ -281,6 +400,11 @@ void Strategy_UpdateAll(float dt)
         if (data->dragging)
             UpdateMovable(i, data);
         else if (data->resizing)
-            UpdateResizable(i, data);
+        {
+            if (data->kind == WT_UNCONSTRAINED || data->kind == WT_UNCONSTRAINED_NOENTRY)
+                UpdateUnconstrained(i, data);
+            else
+                UpdateResizable(i, data);
+        }
     }
 }

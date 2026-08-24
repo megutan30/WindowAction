@@ -197,6 +197,11 @@ int Collision_CheckOverlap(RECT bounds, CollisionOptions opts)
 
 SIZE Collision_ValidateSize(RECT current, SIZE proposed, CollisionOptions opts)
 {
+    return Collision_ValidateSizeEx(current, proposed, opts, MIN_WINDOW_SIZE, MAX_WINDOW_SIZE);
+}
+
+SIZE Collision_ValidateSizeEx(RECT current, SIZE proposed, CollisionOptions opts, int minSize, int maxSize)
+{
     RECT obstacles[MAX_OBSTACLES];
     int n = GatherObstacles(opts, obstacles, MAX_OBSTACLES);
 
@@ -240,14 +245,14 @@ SIZE Collision_ValidateSize(RECT current, SIZE proposed, CollisionOptions opts)
         minHeight = best;
     }
 
-    if (minWidth < MIN_WINDOW_SIZE)
-        minWidth = MIN_WINDOW_SIZE;
-    if (minWidth > MAX_WINDOW_SIZE)
-        minWidth = MAX_WINDOW_SIZE;
-    if (minHeight < MIN_WINDOW_SIZE)
-        minHeight = MIN_WINDOW_SIZE;
-    if (minHeight > MAX_WINDOW_SIZE)
-        minHeight = MAX_WINDOW_SIZE;
+    if (minWidth < minSize)
+        minWidth = minSize;
+    if (minWidth > maxSize)
+        minWidth = maxSize;
+    if (minHeight < minSize)
+        minHeight = minSize;
+    if (minHeight > maxSize)
+        minHeight = maxSize;
 
     SIZE result = {minWidth, minHeight};
     return result;

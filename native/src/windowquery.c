@@ -66,6 +66,20 @@ void WindowQuery_GetClientBounds(int index, RECT *out)
     out->top = tl.y;
     out->right = br.x;
     out->bottom = br.y;
+
+    /* GameWindowはWS_CAPTIONを使わずゲーム描画のタイトルバー帯（クライアント
+       領域最上部TITLE_BAR_HEIGHT px、PaintGameWindowのDrawTitleBar参照）を
+       持つため、GetClientRectはその帯を含んだ全クライアント領域を返す。
+       「移動可能領域」としてはこの帯を歩行可能な内部空間に含めてはいけない
+       （WS_CAPTION時代はOSが非クライアント領域として自動的に除外していた）
+       ので、Goal/ボタン以外の種別ではここで明示的に上端をタイトルバー分
+       押し下げる。 */
+    if (d->kind != WT_GOAL && !IsButtonWindowKind(d->kind))
+    {
+        out->top += TITLE_BAR_HEIGHT;
+        if (out->top > out->bottom)
+            out->top = out->bottom;
+    }
 }
 
 static int IsAdjacent(RECT a, RECT b)

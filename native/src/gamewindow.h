@@ -7,6 +7,19 @@
 #define MAX_CHILDREN 8
 #define MAX_NOENTRY_ZONES 8
 #define MIN_WINDOW_SIZE 100
+/* ゲーム描画のカスタムタイトルバーの高さ(px)。WS_CAPTIONを使わず、
+   クライアント領域最上部にこの高さ分のタイトルバー帯を自前で描画する
+   （PaintGameWindow参照）。 */
+#define TITLE_BAR_HEIGHT 30
+/* 制限なしリサイズ+反転ウィンドウ(WT_UNCONSTRAINED*)専用の絶対サイズ下限。
+   実HWNDは常に正サイズを維持する必要があるため、論理サイズが0を跨いでも
+   実際のウィンドウが完全に潰れないよう、MIN_WINDOW_SIZEより小さいこの値を
+   絶対値の下限として使う。 */
+#define UNCONSTRAINED_MIN_ABS_SIZE 20
+/* 最小化/復元カスタムアニメーションの再生時間(秒)とアニメーション先の
+   点サイズ(px)。0x0だとSetWindowPos/GDIが扱いにくいため小さな正方形にする。 */
+#define MINIMIZE_ANIM_DURATION 0.18f
+#define MINIMIZE_ANIM_POINT_SIZE 4
 /* オリジナルのGameWindow.GetMaximumSize()はint.MaxValueを返す -- 実質的な上限は存在しない
    （settings.jsonにWindow.MaximumSizeの項目自体が無い）。width+delta演算がオーバーフローで
    ラップしないよう、INT_MAXの代わりに十分大きくかつ安全な値を使う。 */
@@ -25,6 +38,8 @@ typedef enum {
     WT_RESIZABLE_NOENTRY,
     WT_MOVABLE_NOENTRY,
     WT_MINIMIZABLE_NOENTRY,
+    WT_UNCONSTRAINED,        /* 制限なしリサイズ+反転ウィンドウ */
+    WT_UNCONSTRAINED_NOENTRY,
     WT_GOAL,
     WT_BTN_START,
     WT_BTN_RETRY,
@@ -68,6 +83,31 @@ typedef struct {
 
     /* NoEntry縞模様アニメーションの位相（isNoEntryの場合のみ意味を持つ） */
     float stripeOffset;
+
+    /* ウィンドウ外観カスタマイズ（SetWindowAppearance）。hasCustomAppearance=0の
+       間はkind別のデフォルト配色（DrawTitleBar/アウトライン描画側の分岐参照）を使う。
+       CreateGameWindowIndexedのZeroMemoryにより未設定時は自動的に0/空文字になる。 */
+    int hasCustomAppearance;
+    COLORREF titleBarBg;
+    COLORREF titleBarFg;
+    COLORREF outlineColor;
+    char titleText[64];
+
+    /* 制限なしリサイズ+反転ウィンドウ(WT_UNCONSTRAINED*)専用。実HWNDのサイズは
+       常にabs(logicalW), abs(logicalH)。符号が負の軸はミラー描画される
+       （PaintGameWindowのStretchBlt参照）。それ以外の種別では常に0以上。 */
+    int logicalW, logicalH;
+    POINT unconstrainedAnchor; /* ドラッグ開始時に固定される左上アンカー点（スクリーン座標） */
+
+    /* 最小化/復元のカスタム縮小・拡大アニメーション状態。WS_CAPTIONを外した
+       ことでOS標準の最小化ジーニーアニメーションが使えなくなった代替
+       （MinimizeAnim_UpdateAll参照）。0=アニメーションなし、1=最小化中
+       （縮小してから実際にOS最小化する）、2=復元中（既にOS復元済みで
+       見た目だけ拡大する）。 */
+    int minimizeAnimState;
+    float minimizeAnimT;
+    RECT minimizeAnimFrom;
+    RECT minimizeAnimTo;
 } GameWindowData;
 
 extern GameWindowData g_windows[MAX_WINDOWS];
@@ -98,6 +138,16 @@ int FindWindowIndex(HWND hwnd);
 GameWindowData *GetWindowData(int index);
 
 void SetWindowMinimized(int index, int minimized);
+
+/* 最小化/復元中のウィンドウの縮小・拡大アニメーションを1フレーム分進める。
+   メインループから毎フレーム呼ぶ（NoEntry_UpdateAnimationと同じ位置づけ）。 */
+void MinimizeAnim_UpdateAll(float dt);
+
+/* ウィンドウ外観をkind別デフォルトから上書きする。titleTextがNULLまたは
+   空文字なら固定文字列"WindowAction"のまま。生成直後に必要なウィンドウ
+   にだけ呼び出す（CreateGameWindow自体のシグネチャは変更しない）。 */
+void SetWindowAppearance(int index, COLORREF titleBarBg, COLORREF titleBarFg,
+                          COLORREF outlineColor, const char *titleText);
 
 /* Deletable戦略: 子要素を切り離し（破棄はせず親なし状態にする）、ウィンドウ自身も
    その親から切り離した上で破棄する。DeletableWindowStrategy.RemoveAndCloseと一致させる。

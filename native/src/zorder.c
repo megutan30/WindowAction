@@ -69,9 +69,13 @@ void ZOrder_BringToFront(HWND hwnd)
             g_order[g_orderCount++] = group[g];
 
     /* 実際のOS Z-orderを内部リストに合わせて再同期する: 背面から前面へ順に走査し、
-       各ウィンドウにHWND_TOPを再適用することで最後の呼び出し（最前面）が優先されるようにする。 */
+       各ウィンドウに再適用することで最後の呼び出し（最前面）が優先されるようにする。
+       ここはHWND_TOPではなくHWND_TOPMOSTを使う -- ゲーム内の全ウィンドウは
+       CreateGameWindowIndexedで常にHWND_TOPMOSTとして生成される設計（デスクトップ上の
+       他アプリより常に手前に表示する）ため、再同期時も明示的にTOPMOSTを維持する方が
+       意図に忠実。 */
     for (int i = 0; i < g_orderCount; i++)
-        SetWindowPos(g_order[i], HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        SetWindowPos(g_order[i], HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
 void ZOrder_ReassertOverlayFront(HWND playerHwnd)

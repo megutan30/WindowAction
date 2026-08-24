@@ -38,12 +38,6 @@ GameWindowData *GetWindowData(int index)
     return &g_windows[index];
 }
 
-static int IsInteractiveKind(WindowKind kind)
-{
-    return kind == WT_MOVABLE || kind == WT_RESIZABLE ||
-           kind == WT_MOVABLE_NOENTRY || kind == WT_RESIZABLE_NOENTRY;
-}
-
 static int IsButtonKind(WindowKind kind)
 {
     return kind == WT_BTN_START || kind == WT_BTN_RETRY || kind == WT_BTN_TOTITLE || kind == WT_BTN_EXIT;
@@ -54,6 +48,13 @@ int IsButtonWindowKind(WindowKind kind) { return IsButtonKind(kind); }
 int IsQueryableWindow(WindowKind kind)
 {
     return !IsButtonKind(kind) && kind != WT_GOAL;
+}
+
+/* Goal/ボタンはウィンドウクロームを持たない（元々枠なしのUI要素）。
+   それ以外の全種別はゲーム描画のタイトルバーを持つ。 */
+static int HasChrome(WindowKind kind)
+{
+    return kind != WT_GOAL && !IsButtonKind(kind);
 }
 
 int FindGoalIndex(void)
@@ -318,6 +319,34 @@ static void DrawGoalMark(HDC hdc, RECT rc)
     DeleteObject(font);
 }
 
+/* ゲーム描画のタイトルバー帯（クライアント領域最上部TITLE_BAR_HEIGHT px）を
+   描画する。WS_CAPTIONを使わなくなったため、OS標準のタイトルバーの代わりに
+   ここで自前描画する。デフォルトの配色は固定のダークグレー+白文字で、
+   外観カスタマイズ（SetWindowAppearance）が設定されていればそちらを使う。 */
+static void DrawTitleBar(HDC hdc, RECT rc, GameWindowData *data)
+{
+    RECT bar = {rc.left, rc.top, rc.right, rc.top + TITLE_BAR_HEIGHT};
+
+    COLORREF barBg = data->hasCustomAppearance ? data->titleBarBg : RGB(45, 45, 48);
+    COLORREF barFg = data->hasCustomAppearance ? data->titleBarFg : RGB(255, 255, 255);
+
+    HBRUSH brush = CreateSolidBrush(barBg);
+    FillRect(hdc, &bar, brush);
+    DeleteObject(brush);
+
+    const char *title = data->hasCustomAppearance && data->titleText[0] != '\0'
+                             ? data->titleText
+                             : "WindowAction";
+    HFONT font = GameFont_Get(11);
+    HFONT oldFont = (HFONT)SelectObject(hdc, font);
+    SetTextColor(hdc, barFg);
+    SetBkMode(hdc, TRANSPARENT);
+    RECT textRc = bar;
+    textRc.left += 8;
+    DrawTextA(hdc, title, -1, &textRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    SelectObject(hdc, oldFont);
+}
+
 static int IsWindowHovered(int index)
 {
     GameWindowData *data = &g_windows[index];
@@ -372,6 +401,16 @@ static void PaintGameWindow(HWND hwnd, int index)
     FillRect(memDC, &rc, brush);
     DeleteObject(brush);
 
+    int hasChrome = HasChrome(data->kind);
+    if (hasChrome)
+        DrawTitleBar(memDC, rc, data);
+
+    /* タイトルバー帯を持つ種別は、マーク/ラベルをその下のクライアント領域
+       だけに収める（帯と重ならないようにする）。 */
+    RECT contentRc = rc;
+    if (hasChrome)
+        contentRc.top += TITLE_BAR_HEIGHT;
+
     switch (data->kind)
     {
     case WT_MOVABLE:
@@ -381,21 +420,24 @@ static void PaintGameWindow(HWND hwnd, int index)
     case WT_MOVABLE_NOENTRY:
     case WT_RESIZABLE_NOENTRY:
     case WT_MINIMIZABLE_NOENTRY:
+    case WT_UNCONSTRAINED:
+    case WT_UNCONSTRAINED_NOENTRY:
     {
         /* StrategyMarkUtility.GetMarkColor: ホバー中は白、それ以外は中間グレー。 */
         COLORREF markColor = IsWindowHovered(index) ? RGB(255, 255, 255) : RGB(128, 128, 128);
         if (data->kind == WT_MOVABLE || data->kind == WT_MOVABLE_NOENTRY)
-            DrawMovableMark(memDC, rc, markColor);
-        else if (data->kind == WT_RESIZABLE || data->kind == WT_RESIZABLE_NOENTRY)
-            DrawResizableMark(memDC, rc, markColor);
+            DrawMovableMark(memDC, contentRc, markColor);
+        else if (data->kind == WT_RESIZABLE || data->kind == WT_RESIZABLE_NOENTRY ||
+                 data->kind == WT_UNCONSTRAINED || data->kind == WT_UNCONSTRAINED_NOENTRY)
+            DrawResizableMark(memDC, contentRc, markColor);
         else if (data->kind == WT_MINIMIZABLE || data->kind == WT_MINIMIZABLE_NOENTRY)
-            DrawMinimizableMark(memDC, rc, markColor);
+            DrawMinimizableMark(memDC, contentRc, markColor);
         else
-            DrawDeletableMark(memDC, rc, markColor);
+            DrawDeletableMark(memDC, contentRc, markColor);
         break;
     }
     case WT_GOAL:
-        DrawGoalMark(memDC, rc);
+        DrawGoalMark(memDC, contentRc);
         break;
     default:
         break;
@@ -417,7 +459,7 @@ static void PaintGameWindow(HWND hwnd, int index)
         HFONT oldFont = (HFONT)SelectObject(memDC, font);
         SetTextColor(memDC, data->fg);
         SetBkMode(memDC, TRANSPARENT);
-        DrawTextA(memDC, data->text, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_WORDBREAK);
+        DrawTextA(memDC, data->text, -1, &contentRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_WORDBREAK);
         SelectObject(memDC, oldFont);
     }
 
@@ -425,12 +467,15 @@ static void PaintGameWindow(HWND hwnd, int index)
     {
         DrawClockwiseStripeBorder(memDC, rc, data->stripeOffset);
     }
-    else if (data->parentIdx >= 0)
+    else if (data->parentIdx >= 0 || data->hasCustomAppearance)
     {
         /* WindowRenderingManagerは、親を持つ全てのウィンドウ（独自の縞模様を
            持つNoEntryウィンドウだけでなく）に対して、この親色に基づく
-           アウトラインを描画する。 */
-        COLORREF outline = CalculateOutlineColor(g_windows[data->parentIdx].bg);
+           アウトラインを描画する。外観カスタマイズでoutlineColorが明示的に
+           設定されている場合はそちらを優先する。 */
+        COLORREF outline = data->hasCustomAppearance
+                                ? data->outlineColor
+                                : CalculateOutlineColor(g_windows[data->parentIdx].bg);
         HPEN pen = CreatePen(PS_SOLID, 5, outline);
         HPEN oldOutlinePen = (HPEN)SelectObject(memDC, pen);
         HBRUSH oldOutlineBrush = (HBRUSH)SelectObject(memDC, GetStockObject(NULL_BRUSH));
@@ -440,7 +485,23 @@ static void PaintGameWindow(HWND hwnd, int index)
         DeleteObject(pen);
     }
 
-    BitBlt(hdc, 0, 0, rc.right - rc.left, rc.bottom - rc.top, memDC, 0, 0, SRCCOPY);
+    int w = rc.right - rc.left;
+    int h = rc.bottom - rc.top;
+    /* 制限なしリサイズ+反転ウィンドウが負の論理サイズ（反転状態）にある場合、
+       実HWNDは常に正サイズのままだが、描画内容だけをStretchBltの負幅/負高さ
+       指定でミラーする。プレイヤーの衝突判定は実HWNDの矩形しか見ないため、
+       これは純粋に見た目だけの効果。 */
+    int flipX = (data->kind == WT_UNCONSTRAINED || data->kind == WT_UNCONSTRAINED_NOENTRY) && data->logicalW < 0;
+    int flipY = (data->kind == WT_UNCONSTRAINED || data->kind == WT_UNCONSTRAINED_NOENTRY) && data->logicalH < 0;
+    if (flipX || flipY)
+    {
+        StretchBlt(hdc, flipX ? w : 0, flipY ? h : 0, flipX ? -w : w, flipY ? -h : h,
+                   memDC, 0, 0, w, h, SRCCOPY);
+    }
+    else
+    {
+        BitBlt(hdc, 0, 0, w, h, memDC, 0, 0, SRCCOPY);
+    }
     SelectObject(memDC, oldBmp);
     DeleteObject(memBmp);
     DeleteDC(memDC);
@@ -454,17 +515,10 @@ static LRESULT CALLBACK GameWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 
     switch (msg)
     {
-    case WM_NCHITTEST:
-    {
-        if (index >= 0 && IsInteractiveKind(g_windows[index].kind))
-        {
-            LRESULT def = DefWindowProcA(hwnd, msg, wParam, lParam);
-            if (def == HTCAPTION || def == HTCLIENT)
-                return HTCLIENT;
-            return def; /* リサイズ境界のヒットテストは無効化しておく; 移動処理は独自のドラッグで行う */
-        }
-        break;
-    }
+    /* WM_NCHITTESTの特別扱いは不要になった: 全ゲームウィンドウがWS_POPUP
+       （非クライアント領域を持たない）になったため、DefWindowProcAは常に
+       HTCLIENTを返す。移動/リサイズは元々OSの非クライアントドラッグではなく
+       独自のマウスポーリング（Strategy_UpdateAll）で行っている。 */
     case WM_LBUTTONDOWN:
         if (index >= 0)
         {
@@ -523,25 +577,16 @@ static LRESULT CALLBACK GameWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
     }
     case WM_SYSCOMMAND:
     {
-        /* HandleSysCommandは常にWM_SYSCOMMANDをウィンドウのStrategyに転送し
-           NotHandledを返す。そのため、この後もDefWindowProcAが実際のOSレベルの
-           最小化/復元を実行する（このcaseは下の共有"break"にフォールスルーし、
-           "return"はしない）。オリジナルではStrategyディスパッチ自体が非対称:
-             - SC_RESTORE -> BaseWindowStrategy.HandleWindowMessageが全ての
-               ウィンドウ種別に対してこれを処理する（window.OnRestore()）。
-               復元はストラテジーに関わらず同じ動作のため。
-             - SC_MINIMIZE -> MinimizableWindowStrategyのみがこれをオーバーライドし、
-               最小化カスケード（WindowEffectManager.ApplyEffects）を実行する。
-               他の全てのストラテジーの基底ハンドラはこれに対して何もしないため、
-               Minimizableでないウィンドウが何らかの形でSC_MINIMIZEを受け取っても
-               （通常はこれをトリガーするタイトルバーのボックス自体が存在しない）、
-               ゲームロジックの効果なしに素のOSレベルの最小化が行われるだけ --
-               これは「改善」すべき点ではなく、単に一致させるべき挙動。
-           最小化されたWT_MINIMIZABLEウィンドウがここでSC_RESTOREの処理を
-           一度も受けなければ、OS標準の復元でのみ最小化解除が可能になるが、
-           それはHWNDの非表示を解除するだけで、ゲーム側のminimized=trueフラグを
-           クリアすることも、Hierarchy_CheckAndUpdateを再実行することもない。
-           その結果、再び表示された後も永続的に親子ツリーから外れたままになる。 */
+        /* WS_SYSMENUを外したのでシステムメニュー/タイトルバーのダブルクリック
+           経由でこのメッセージが飛んでくることはなくなったが、タスクバーの
+           アイコンをクリックしての最小化/復元はWS_SYSMENUの有無に関わらず
+           シェルがWM_SYSCOMMAND(SC_MINIMIZE/SC_RESTORE)を送ってくる --
+           これを処理しないと、最小化したウィンドウをタスクバー経由で
+           復元する手段が失われる（一度削除して発生した回帰）。
+           SetWindowMinimizedを経由させることで、トリガー元（クリック/
+           タスクバー）に関わらずdata->minimized状態と縮小/拡大アニメーション
+           が一貫する。DefWindowProcAには渡さない（渡すとOS自身の
+           無アニメーションな即時最小化/復元が並行して起きてしまう）。 */
         int command = (int)(wParam & 0xFFF0);
         if (index >= 0)
         {
@@ -551,8 +596,9 @@ static LRESULT CALLBACK GameWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
                 SetWindowMinimized(index, 1);
             else if (command == SC_RESTORE && g_windows[index].minimized)
                 SetWindowMinimized(index, 0);
+            return 0;
         }
-        break; /* 下のDefWindowProcAにフォールスルーする */
+        break;
     }
     }
     return DefWindowProcA(hwnd, msg, wParam, lParam);
@@ -643,6 +689,15 @@ int CreateGameWindowIndexed(HINSTANCE hInstance, WindowKind kind, int x, int y, 
         fg = RGB(0, 0, 0);
         isNoEntry = 1;
         break;
+    case WT_UNCONSTRAINED:
+        bg = RGB(221, 160, 221);
+        fg = RGB(0, 0, 0);
+        break;
+    case WT_UNCONSTRAINED_NOENTRY:
+        bg = RGB(221, 160, 221);
+        fg = RGB(0, 0, 0);
+        isNoEntry = 1;
+        break;
     case WT_GOAL:
         bg = RGB(255, 0, 255);
         fg = RGB(255, 215, 0);
@@ -679,7 +734,12 @@ int CreateGameWindowIndexed(HINSTANCE hInstance, WindowKind kind, int x, int y, 
     }
     else
     {
-        style = WS_CAPTION | WS_SYSMENU | WS_BORDER | WS_VISIBLE;
+        /* ゲーム描画のカスタムタイトルバー(DrawTitleBar)を使うため、OS標準の
+           WS_CAPTION|WS_SYSMENU|WS_BORDERは付けない -- クライアント領域が
+           そのままウィンドウ全体になる。移動/リサイズは元々WM_NCHITTESTで
+           OS標準ドラッグを無効化し独自ポーリングで行っていたため、この
+           変更によるマウス操作ロジックへの影響はない。 */
+        style = WS_POPUP | WS_VISIBLE;
         exStyle = 0;
     }
 
@@ -692,14 +752,41 @@ int CreateGameWindowIndexed(HINSTANCE hInstance, WindowKind kind, int x, int y, 
     {
         SetLayeredWindowAttributes(hwnd, RGB(255, 0, 255), 0, LWA_COLORKEY);
     }
-    else if (!IsButtonKind(kind))
-    {
-        HMENU sysMenu = GetSystemMenu(hwnd, FALSE);
-        if (sysMenu)
-            EnableMenuItem(sysMenu, SC_CLOSE, MF_BYCOMMAND | MF_GRAYED);
-    }
+    /* WS_SYSMENUを付けなくなったため、システムメニュー経由のSC_CLOSE無効化は
+       不要（閉じるボタン自体がOS側に存在しない）。 */
 
     SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    /* Windowsのフォアグラウンドロック制限により、他のフォアグラウンドプロセス
+       （エディタやターミナル等）から起動された直後のこのプロセスは、最初に
+       表示する1枚目のウィンドウについてはSetWindowPos(HWND_TOPMOST)（および
+       SetForegroundWindow）を実際には拒否されることがある -- 何度単純に
+       再試行しても直らない（実測確認済み）。2枚目以降のウィンドウは同じ呼び出しで
+       即座に成功するため、影響を受けるのはステージ最初の1枚だけだが、それが
+       常に「一番奥に固定される」ように見える実際のバグの原因になっていた。
+       現在のフォアグラウンドウィンドウのスレッドと自スレッドの入力キューを
+       一時的に結合(AttachThreadInput)すると、この制限を正規に回避できる
+       （多くのWindowsアプリが採用する標準的な手法）。 */
+    if (!(GetWindowLongPtrA(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST))
+    {
+        HWND fg = GetForegroundWindow();
+        DWORD curThread = GetCurrentThreadId();
+        DWORD fgThread = fg ? GetWindowThreadProcessId(fg, NULL) : 0;
+        int attached = (fgThread != 0 && fgThread != curThread) ? AttachThreadInput(curThread, fgThread, TRUE) : 0;
+
+        SetForegroundWindow(hwnd);
+        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+
+        if (attached)
+            AttachThreadInput(curThread, fgThread, FALSE);
+
+        /* それでも駄目な場合の最終手段: 一旦NOTOPMOSTにしてからTOPMOSTへ
+           付け直すと、ごく稀にHWND_TOPMOST単発が反映されないケースで通ることがある。 */
+        if (!(GetWindowLongPtrA(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST))
+        {
+            SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
+    }
 
     int index = g_windowCount++;
     GameWindowData *data = &g_windows[index];
@@ -712,6 +799,8 @@ int CreateGameWindowIndexed(HINSTANCE hInstance, WindowKind kind, int x, int y, 
     data->isNoEntry = isNoEntry;
     data->parentIdx = -1;
     data->childCount = 0;
+    data->logicalW = w;
+    data->logicalH = h;
     if (text)
     {
         int i = 0;
@@ -765,17 +854,133 @@ void GetWindowFullBounds(HWND hwnd, RECT *out)
     out->bottom = br.y;
 }
 
+void SetWindowAppearance(int index, COLORREF titleBarBg, COLORREF titleBarFg,
+                          COLORREF outlineColor, const char *titleText)
+{
+    GameWindowData *data = GetWindowData(index);
+    if (!data || !data->hwnd)
+        return;
+
+    data->hasCustomAppearance = 1;
+    data->titleBarBg = titleBarBg;
+    data->titleBarFg = titleBarFg;
+    data->outlineColor = outlineColor;
+    data->titleText[0] = '\0';
+    if (titleText)
+    {
+        int i = 0;
+        while (titleText[i] != '\0' && i < 63)
+        {
+            data->titleText[i] = titleText[i];
+            i++;
+        }
+        data->titleText[i] = '\0';
+    }
+    InvalidateRect(data->hwnd, NULL, FALSE);
+}
+
+/* [cx,cy]を中心とするMINIMIZE_ANIM_POINT_SIZE四方の小さな矩形を返す
+   （0x0だとSetWindowPos/GDIが扱いにくいため）。 */
+static RECT MinimizeAnimPointRect(int cx, int cy)
+{
+    int h = MINIMIZE_ANIM_POINT_SIZE / 2;
+    RECT r = {cx - h, cy - h, cx + h, cy + h};
+    return r;
+}
+
 void SetWindowMinimized(int index, int minimized)
 {
     /* GameWindow.OnMinimize/OnRestoreは非対称: 最小化はサブツリー全体
        （その中のどこに親子付けされていようとプレイヤーやゴールも含む）を
        再帰的に解体し個別に最小化するが、復元は復元対象の1つのウィンドウ
        にしか作用しない。Hierarchy_MinimizeSubtreeとHierarchy_RestoreWindow
-       を参照。 */
+       を参照。
+
+       WS_CAPTIONを外したことでOS標準の最小化ジーニーアニメーションが
+       使えなくなったため、ここで自前の縮小/拡大アニメーションを開始する。
+       実際の階層解体/OS最小化（Hierarchy_MinimizeSubtree）はアニメーション
+       完了時にMinimizeAnim_UpdateAllから呼ばれる -- こうすることで、
+       Windowsが「復元先」として記憶するWINDOWPLACEMENTには、縮小後ではなく
+       常に正しいフルサイズが渡る。復元側はHierarchy_RestoreWindowを先に
+       呼んでOSに正しいフルサイズへ戻させてから、そこから一旦縮めて
+       アニメーションで元のサイズへ戻す（見た目の拡大効果のみ）。 */
+    GameWindowData *data = GetWindowData(index);
+    if (!data || !data->hwnd)
+        return;
+
     if (minimized)
-        Hierarchy_MinimizeSubtree(index);
+    {
+        if (data->minimized || data->minimizeAnimState != 0)
+            return;
+        GetWindowRect(data->hwnd, &data->minimizeAnimFrom);
+        int cx = (data->minimizeAnimFrom.left + data->minimizeAnimFrom.right) / 2;
+        data->minimizeAnimTo = MinimizeAnimPointRect(cx, data->minimizeAnimFrom.bottom);
+        data->minimizeAnimT = 0.0f;
+        data->minimizeAnimState = 1;
+    }
     else
+    {
+        if (!data->minimized || data->minimizeAnimState != 0)
+            return;
         Hierarchy_RestoreWindow(index);
+
+        RECT full;
+        GetWindowRect(data->hwnd, &full);
+        int cx = (full.left + full.right) / 2;
+        data->minimizeAnimFrom = MinimizeAnimPointRect(cx, full.bottom);
+        data->minimizeAnimTo = full;
+        SetWindowPos(data->hwnd, NULL, data->minimizeAnimFrom.left, data->minimizeAnimFrom.top,
+                     data->minimizeAnimFrom.right - data->minimizeAnimFrom.left,
+                     data->minimizeAnimFrom.bottom - data->minimizeAnimFrom.top,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+        data->minimizeAnimT = 0.0f;
+        data->minimizeAnimState = 2;
+    }
+}
+
+static int LerpInt(int a, int b, float t)
+{
+    return a + (int)((b - a) * t);
+}
+
+void MinimizeAnim_UpdateAll(float dt)
+{
+    for (int i = 0; i < g_windowCount; i++)
+    {
+        GameWindowData *data = &g_windows[i];
+        if (data->minimizeAnimState == 0 || !data->hwnd)
+            continue;
+
+        data->minimizeAnimT += dt / MINIMIZE_ANIM_DURATION;
+        float t = data->minimizeAnimT;
+        if (t > 1.0f)
+            t = 1.0f;
+
+        RECT from = data->minimizeAnimFrom;
+        RECT to = data->minimizeAnimTo;
+        int x = LerpInt(from.left, to.left, t);
+        int y = LerpInt(from.top, to.top, t);
+        int w = LerpInt(from.right - from.left, to.right - to.left, t);
+        int h = LerpInt(from.bottom - from.top, to.bottom - to.top, t);
+        SetWindowPos(data->hwnd, NULL, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+        InvalidateRect(data->hwnd, NULL, FALSE);
+
+        if (data->minimizeAnimT >= 1.0f)
+        {
+            int wasMinimizing = (data->minimizeAnimState == 1);
+            data->minimizeAnimState = 0;
+            if (wasMinimizing)
+            {
+                /* 縮小アニメーションで動かした分を元のフルサイズへ戻してから
+                   実際にOS最小化する（上の関数コメント参照）。 */
+                RECT full = data->minimizeAnimFrom;
+                SetWindowPos(data->hwnd, NULL, full.left, full.top,
+                             full.right - full.left, full.bottom - full.top,
+                             SWP_NOZORDER | SWP_NOACTIVATE);
+                Hierarchy_MinimizeSubtree(i);
+            }
+        }
+    }
 }
 
 void DeleteWindow(int index)

@@ -154,6 +154,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         Button_UpdateParent();
         HandleDeletableInput();
         NoEntry_UpdateAnimation((float)dt);
+        MinimizeAnim_UpdateAll((float)dt);
         InvalidateLiveWindows();
         ZOrder_ReassertOverlayFront(g_player.hwnd);
 
