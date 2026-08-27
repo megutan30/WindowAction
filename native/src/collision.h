@@ -23,6 +23,14 @@ SIZE Collision_ValidateSize(RECT current, SIZE proposed, CollisionOptions opts);
    でこちらに委譲する。 */
 SIZE Collision_ValidateSizeEx(RECT current, SIZE proposed, CollisionOptions opts, int minSize, int maxSize);
 
+/* Collision_ValidateSizeExの「アンカー基準の双方向成長」版。WT_UNCONSTRAINED
+   (制限なしリサイズ+反転ウィンドウ)専用: flipX/flipYがtrueの軸はanchorを
+   右/下端として固定し左/上方向へ伸びるものとして障害物を検出する
+   -- 反転中でも実際に伸びている側のNoEntry等に正しくぶつかるようにする。 */
+SIZE Collision_ValidateSizeFromAnchor(POINT anchor, int flipX, int flipY,
+                                       SIZE currentAbs, SIZE proposed,
+                                       CollisionOptions opts, int minSize, int maxSize);
+
 /* BaseWindowStrategy.CheckCollision(window, checkBounds)相当: スイープ経路では
    なく、指定した矩形がその場で障害物と重なっているかどうかだけを判定する
    静的な当たり判定。MovableWindowStrategy.UpdateBlockFlagsが1px先読みの

@@ -257,3 +257,77 @@ SIZE Collision_ValidateSizeEx(RECT current, SIZE proposed, CollisionOptions opts
     SIZE result = {minWidth, minHeight};
     return result;
 }
+
+/* Collision_ValidateSizeExはcurrent.left/topを固定して右/下方向にのみ
+   伸びる前提で障害物を探す。WT_UNCONSTRAINED(制限なしリサイズ+反転)は
+   flip中の軸ではアンカーを右/下端として固定し左/上方向へ伸びるため、
+   その前提では反転側の障害物を検出できない（既知の制約だった）。
+   本関数はアンカー基準で伸長方向をflipX/flipYごとに切り替えることで、
+   反転中でも実際に伸びている側の障害物を正しく検出する。
+   currentAbs: 直前フレームでコミット済みの絶対サイズ（成長中かどうかの
+   判定と、直交する軸のチェック矩形の一辺に使う）。 */
+SIZE Collision_ValidateSizeFromAnchor(POINT anchor, int flipX, int flipY,
+                                       SIZE currentAbs, SIZE proposed,
+                                       CollisionOptions opts, int minSize, int maxSize)
+{
+    RECT obstacles[MAX_OBSTACLES];
+    int n = GatherObstacles(opts, obstacles, MAX_OBSTACLES);
+
+    int isGrowingW = proposed.cx > currentAbs.cx;
+    int isGrowingH = proposed.cy > currentAbs.cy;
+
+    int curVisTop = flipY ? (anchor.y - currentAbs.cy) : anchor.y;
+
+    int minWidth = proposed.cx;
+    if (isGrowingW)
+    {
+        RECT xResize = flipX
+            ? (RECT){anchor.x - proposed.cx, curVisTop, anchor.x, curVisTop + currentAbs.cy}
+            : (RECT){anchor.x, curVisTop, anchor.x + proposed.cx, curVisTop + currentAbs.cy};
+        int best = proposed.cx;
+        for (int i = 0; i < n; i++)
+        {
+            RECT o = obstacles[i];
+            if (!RectsOverlap(xResize, o))
+                continue;
+            int candidateW = flipX ? (anchor.x - o.right) : (o.left - anchor.x);
+            if (candidateW < best)
+                best = candidateW;
+        }
+        minWidth = best;
+    }
+
+    int effectiveW = isGrowingW ? minWidth : currentAbs.cx;
+    int curVisLeft = flipX ? (anchor.x - effectiveW) : anchor.x;
+
+    int minHeight = proposed.cy;
+    if (isGrowingH)
+    {
+        RECT yResize = flipY
+            ? (RECT){curVisLeft, anchor.y - proposed.cy, curVisLeft + effectiveW, anchor.y}
+            : (RECT){curVisLeft, anchor.y, curVisLeft + effectiveW, anchor.y + proposed.cy};
+        int best = proposed.cy;
+        for (int i = 0; i < n; i++)
+        {
+            RECT o = obstacles[i];
+            if (!RectsOverlap(yResize, o))
+                continue;
+            int candidateH = flipY ? (anchor.y - o.bottom) : (o.top - anchor.y);
+            if (candidateH < best)
+                best = candidateH;
+        }
+        minHeight = best;
+    }
+
+    if (minWidth < minSize)
+        minWidth = minSize;
+    if (minWidth > maxSize)
+        minWidth = maxSize;
+    if (minHeight < minSize)
+        minHeight = minSize;
+    if (minHeight > maxSize)
+        minHeight = maxSize;
+
+    SIZE result = {minWidth, minHeight};
+    return result;
+}

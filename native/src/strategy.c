@@ -2,6 +2,7 @@
 #include "collision.h"
 #include "hierarchy.h"
 #include "player.h"
+#include "editor.h"
 #include <stdlib.h>
 
 int g_requestRestart = 0;
@@ -132,6 +133,20 @@ void Strategy_HandleButtonClick(WindowKind kind)
     case WT_BTN_EXIT:
         g_requestExit = 1;
         break;
+#ifdef ENABLE_STAGE_EDITOR
+    case WT_BTN_TEST:
+        g_requestTest = 1;
+        break;
+    case WT_BTN_EXPORT:
+        Editor_ExportStage();
+        break;
+    case WT_BTN_RESET:
+        /* hInstanceはstrategy.cからは持っていないため、main.cのリクエスト
+           フラグ経由でEditor_LoadTestStageを呼び直す（g_requestTestを
+           再利用する: 現在既にテストステージ中でも同じ処理で作り直せる）。 */
+        g_requestTest = 1;
+        break;
+#endif
     default:
         break;
     }
@@ -355,18 +370,31 @@ static void UpdateUnconstrained(int index, GameWindowData *data)
 
     int prevAbsW = abs(data->logicalW);
     int prevAbsH = abs(data->logicalH);
-
-    RECT logicalCurrent = {data->unconstrainedAnchor.x, data->unconstrainedAnchor.y,
-                            data->unconstrainedAnchor.x + prevAbsW, data->unconstrainedAnchor.y + prevAbsH};
+    /* 反転イベント(前フレームまでの符号と今回の符号が食い違う)の検出用。
+       子孫のinheritedFlipX/Yは「今その内部にいるか」のライブ判定ではなく、
+       実際に反転が起きた瞬間だけXORで積算する永続フラグのため、コミット前の
+       符号をここで保持しておく必要がある。 */
+    int wasFlippedX = data->logicalW < 0;
+    int wasFlippedY = data->logicalH < 0;
 
     CollisionOptions opts;
     opts.excludeIndex = index;
     opts.excludeChildren = 1;
+    /* 制限なしリサイズは通常ウィンドウ用のNoEntry判定(isNoEntryの場合のみ)
+       とは無関係に、不可侵ゾーン/不可侵ウィンドウ境界には常にぶつかる
+       -- GatherObstaclesはNoEntry系をcheckNormalWindowsの値に関わらず
+       常に収集するため、この設定のままでよい。 */
     opts.checkNormalWindows = data->isNoEntry;
 
+    SIZE currentAbs = {prevAbsW, prevAbsH};
     SIZE proposed = {absW, absH};
-    SIZE validated = Collision_ValidateSizeEx(logicalCurrent, proposed, opts,
-                                               UNCONSTRAINED_MIN_ABS_SIZE, MAX_WINDOW_SIZE);
+    /* Collision_ValidateSizeExではなくこちらを使う: flip中の軸はアンカーを
+       右/下端として固定し左/上方向へ伸びるため、実際に伸びている側の
+       障害物（不可侵ゾーン等）を正しく検出できる（アンカーから常に正方向
+       へ伸びる前提のExでは反転側の障害物を見逃す既知の制約があった）。 */
+    SIZE validated = Collision_ValidateSizeFromAnchor(data->unconstrainedAnchor, flipX, flipY,
+                                                       currentAbs, proposed, opts,
+                                                       UNCONSTRAINED_MIN_ABS_SIZE, MAX_WINDOW_SIZE);
 
     int visualLeft = flipX ? (data->unconstrainedAnchor.x - validated.cx) : data->unconstrainedAnchor.x;
     int visualTop = flipY ? (data->unconstrainedAnchor.y - validated.cy) : data->unconstrainedAnchor.y;
@@ -379,9 +407,28 @@ static void UpdateUnconstrained(int index, GameWindowData *data)
         SetWindowPos(data->hwnd, NULL, visualLeft, visualTop, validated.cx, validated.cy,
                      SWP_NOZORDER | SWP_NOACTIVATE);
 
-        float scaleX = (float)validated.cx / (float)prevAbsW;
-        float scaleY = (float)validated.cy / (float)prevAbsH;
-        Hierarchy_ApplyScale(index, scaleX, scaleY);
+        /* 子の追従はHierarchy_ApplyScaleではなくHierarchy_ApplyRelativeTransform
+           を使う: 通常のResizableと違い、アンカー基準の反転で親の可視矩形の
+           左上そのものが動く/反転しうるため、子の絶対位置を固定したまま
+           サイズだけ変えると相対配置が崩れる（実際に発生した不具合）。
+           子は親に対する相対位置・相対サイズを保ったまま追従させる。
+           スケール基準は（通常のResizableと同じく）ドラッグ開始時点の
+           サイズ・位置＝ジェスチャー全体を通して固定のrootOrigRect。 */
+        int origAbsW = abs(data->resizeOrigSize.cx);
+        int origAbsH = abs(data->resizeOrigSize.cy);
+        int origFlipX = data->resizeOrigSize.cx < 0;
+        int origFlipY = data->resizeOrigSize.cy < 0;
+        int origVisualLeft = origFlipX ? (data->unconstrainedAnchor.x - origAbsW) : data->unconstrainedAnchor.x;
+        int origVisualTop = origFlipY ? (data->unconstrainedAnchor.y - origAbsH) : data->unconstrainedAnchor.y;
+        RECT rootOrigRect = {origVisualLeft, origVisualTop, origVisualLeft + origAbsW, origVisualTop + origAbsH};
+        RECT rootNewRect = {visualLeft, visualTop, visualLeft + validated.cx, visualTop + validated.cy};
+        Hierarchy_ApplyRelativeTransform(index, rootOrigRect, rootNewRect);
+
+        /* 反転イベントが起きた軸だけ、その時点の全子孫のinheritedFlipX/Yを
+           永続的にXORで反転させる。親から切り離された後もこの見た目は
+           元に戻らず、再度いずれかの祖先が反転した時だけ変化する。 */
+        if (flipX != wasFlippedX || flipY != wasFlippedY)
+            Hierarchy_ToggleInheritedFlip(index, flipX != wasFlippedX, flipY != wasFlippedY);
 
         data->logicalW = flipX ? -validated.cx : validated.cx;
         data->logicalH = flipY ? -validated.cy : validated.cy;

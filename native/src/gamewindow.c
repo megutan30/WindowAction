@@ -5,6 +5,7 @@
 #include "player.h"
 #include "windowquery.h"
 #include "noentry.h"
+#include "editor.h"
 #include <stdio.h>
 #include <math.h>
 
@@ -40,7 +41,13 @@ GameWindowData *GetWindowData(int index)
 
 static int IsButtonKind(WindowKind kind)
 {
-    return kind == WT_BTN_START || kind == WT_BTN_RETRY || kind == WT_BTN_TOTITLE || kind == WT_BTN_EXIT;
+    if (kind == WT_BTN_START || kind == WT_BTN_RETRY || kind == WT_BTN_TOTITLE || kind == WT_BTN_EXIT)
+        return 1;
+#ifdef ENABLE_STAGE_EDITOR
+    if (kind == WT_BTN_PALETTE || kind == WT_BTN_TEST || kind == WT_BTN_EXPORT || kind == WT_BTN_RESET)
+        return 1;
+#endif
+    return 0;
 }
 
 int IsButtonWindowKind(WindowKind kind) { return IsButtonKind(kind); }
@@ -55,6 +62,121 @@ int IsQueryableWindow(WindowKind kind)
 static int HasChrome(WindowKind kind)
 {
     return kind != WT_GOAL && !IsButtonKind(kind);
+}
+
+/* kind別のデフォルト配色/solid/isNoEntryを返す。CreateGameWindowIndexedの
+   ウィンドウ生成時と、PaintGameWindowのパレットアイコン描画（実際には
+   生成しないwindowKindの見た目だけを借りる）の両方から使う共通ロジック。 */
+static void GetKindAppearance(WindowKind kind, COLORREF *bg, COLORREF *fg, int *solid, int *isNoEntry)
+{
+    *solid = 1;
+    *isNoEntry = 0;
+    switch (kind)
+    {
+    case WT_NORMAL_BLACK:
+        *bg = RGB(0, 0, 0);
+        *fg = RGB(255, 255, 255);
+        break;
+    case WT_NORMAL_WHITE:
+        *bg = RGB(255, 255, 255);
+        *fg = RGB(0, 0, 0);
+        break;
+    case WT_TEXT_DISPLAY:
+        *bg = RGB(0, 0, 0);
+        *fg = RGB(255, 255, 255);
+        *solid = 0;
+        break;
+    case WT_MOVABLE:
+        *bg = RGB(173, 216, 230);
+        *fg = RGB(0, 0, 0);
+        break;
+    case WT_RESIZABLE:
+        *bg = RGB(144, 238, 144);
+        *fg = RGB(0, 0, 0);
+        break;
+    case WT_MINIMIZABLE:
+    case WT_DELETABLE:
+        *bg = RGB(255, 182, 193);
+        *fg = RGB(0, 0, 0);
+        break;
+    case WT_NORMAL_BLACK_NOENTRY:
+        *bg = RGB(0, 0, 0);
+        *fg = RGB(255, 255, 255);
+        *isNoEntry = 1;
+        break;
+    case WT_NORMAL_WHITE_NOENTRY:
+        *bg = RGB(255, 255, 255);
+        *fg = RGB(0, 0, 0);
+        *isNoEntry = 1;
+        break;
+    case WT_RESIZABLE_NOENTRY:
+        *bg = RGB(144, 238, 144);
+        *fg = RGB(0, 0, 0);
+        *isNoEntry = 1;
+        break;
+    case WT_MOVABLE_NOENTRY:
+        *bg = RGB(173, 216, 230);
+        *fg = RGB(0, 0, 0);
+        *isNoEntry = 1;
+        break;
+    case WT_MINIMIZABLE_NOENTRY:
+        *bg = RGB(255, 182, 193);
+        *fg = RGB(0, 0, 0);
+        *isNoEntry = 1;
+        break;
+    case WT_UNCONSTRAINED:
+        *bg = RGB(221, 160, 221);
+        *fg = RGB(0, 0, 0);
+        break;
+    case WT_UNCONSTRAINED_NOENTRY:
+        *bg = RGB(221, 160, 221);
+        *fg = RGB(0, 0, 0);
+        *isNoEntry = 1;
+        break;
+    case WT_GOAL:
+        *bg = RGB(255, 0, 255);
+        *fg = RGB(255, 215, 0);
+        *solid = 0;
+        break;
+    case WT_BTN_START:
+    case WT_BTN_RETRY:
+    case WT_BTN_TOTITLE:
+    case WT_BTN_EXIT:
+        *bg = RGB(200, 200, 200);
+        *fg = RGB(0, 0, 0);
+        *solid = 0;
+        break;
+#ifdef ENABLE_STAGE_EDITOR
+    case WT_BTN_PALETTE:
+    case WT_BTN_TEST:
+    case WT_BTN_EXPORT:
+    case WT_BTN_RESET:
+        *bg = RGB(200, 200, 200);
+        *fg = RGB(0, 0, 0);
+        *solid = 0;
+        break;
+#endif
+    default:
+        *bg = RGB(128, 128, 128);
+        *fg = RGB(255, 255, 255);
+        break;
+    }
+}
+
+int WindowKind_IsNoEntry(WindowKind kind)
+{
+    COLORREF bg, fg;
+    int solid, isNoEntry;
+    GetKindAppearance(kind, &bg, &fg, &solid, &isNoEntry);
+    return isNoEntry;
+}
+
+void GameWindow_GetEffectiveFlip(const GameWindowData *data, int *outFlipX, int *outFlipY)
+{
+    int ownFlipX = (data->kind == WT_UNCONSTRAINED || data->kind == WT_UNCONSTRAINED_NOENTRY) && data->logicalW < 0;
+    int ownFlipY = (data->kind == WT_UNCONSTRAINED || data->kind == WT_UNCONSTRAINED_NOENTRY) && data->logicalH < 0;
+    *outFlipX = ownFlipX ^ data->inheritedFlipX;
+    *outFlipY = ownFlipY ^ data->inheritedFlipY;
 }
 
 int FindGoalIndex(void)
@@ -319,6 +441,24 @@ static void DrawGoalMark(HDC hdc, RECT rc)
     DeleteObject(font);
 }
 
+/* kindに対応するストラテジーマーク（あれば）を描画する。PaintGameWindowの
+   通常描画と、ステージエディターのパレットアイコン描画（「配置される実際の
+   種別」の見た目を借りるだけで実際にはそのkindのウィンドウではない）の
+   両方から呼べる共通ロジック。マークを持たない種別（Normal/TextDisplay等）
+   は何も描かない。 */
+static void DrawKindMark(HDC hdc, RECT rc, WindowKind kind, COLORREF markColor)
+{
+    if (kind == WT_MOVABLE || kind == WT_MOVABLE_NOENTRY)
+        DrawMovableMark(hdc, rc, markColor);
+    else if (kind == WT_RESIZABLE || kind == WT_RESIZABLE_NOENTRY ||
+             kind == WT_UNCONSTRAINED || kind == WT_UNCONSTRAINED_NOENTRY)
+        DrawResizableMark(hdc, rc, markColor);
+    else if (kind == WT_MINIMIZABLE || kind == WT_MINIMIZABLE_NOENTRY)
+        DrawMinimizableMark(hdc, rc, markColor);
+    else if (kind == WT_DELETABLE)
+        DrawDeletableMark(hdc, rc, markColor);
+}
+
 /* ゲーム描画のタイトルバー帯（クライアント領域最上部TITLE_BAR_HEIGHT px）を
    描画する。WS_CAPTIONを使わなくなったため、OS標準のタイトルバーの代わりに
    ここで自前描画する。デフォルトの配色は固定のダークグレー+白文字で、
@@ -394,6 +534,18 @@ static void PaintGameWindow(HWND hwnd, int index)
        (200,200,200) -- data->bg（生成時に固定）だけではこれを表現できないため、
        ボタン種別の場合はここで分岐してdata->bgをそのまま使わないようにしている。 */
     COLORREF fillColor = data->bg;
+#ifdef ENABLE_STAGE_EDITOR
+    if (data->kind == WT_BTN_PALETTE)
+    {
+        /* パレットアイコンは灰色ボタンではなく、配置される実際の種別の背景色を
+           そのまま表示する（一目で何を置けるか分かるようにする）。 */
+        COLORREF pbg, pfg;
+        int psolid, pIsNoEntry;
+        GetKindAppearance(data->paletteKind, &pbg, &pfg, &psolid, &pIsNoEntry);
+        fillColor = pbg;
+    }
+    else
+#endif
     if (IsButtonWindowKind(data->kind))
         fillColor = IsWindowHovered(index) ? RGB(230, 230, 230) : RGB(200, 200, 200);
 
@@ -425,20 +577,21 @@ static void PaintGameWindow(HWND hwnd, int index)
     {
         /* StrategyMarkUtility.GetMarkColor: ホバー中は白、それ以外は中間グレー。 */
         COLORREF markColor = IsWindowHovered(index) ? RGB(255, 255, 255) : RGB(128, 128, 128);
-        if (data->kind == WT_MOVABLE || data->kind == WT_MOVABLE_NOENTRY)
-            DrawMovableMark(memDC, contentRc, markColor);
-        else if (data->kind == WT_RESIZABLE || data->kind == WT_RESIZABLE_NOENTRY ||
-                 data->kind == WT_UNCONSTRAINED || data->kind == WT_UNCONSTRAINED_NOENTRY)
-            DrawResizableMark(memDC, contentRc, markColor);
-        else if (data->kind == WT_MINIMIZABLE || data->kind == WT_MINIMIZABLE_NOENTRY)
-            DrawMinimizableMark(memDC, contentRc, markColor);
-        else
-            DrawDeletableMark(memDC, contentRc, markColor);
+        DrawKindMark(memDC, contentRc, data->kind, markColor);
         break;
     }
     case WT_GOAL:
         DrawGoalMark(memDC, contentRc);
         break;
+#ifdef ENABLE_STAGE_EDITOR
+    case WT_BTN_PALETTE:
+        /* パレットアイコンは「配置される実際の種別」のマークをそのまま表示する
+           （灰色ボタンに文字ラベルだけ、ではなく一目で分かるようにする）。 */
+        DrawKindMark(memDC, contentRc, data->paletteKind, RGB(255, 255, 255));
+        if (data->paletteIsNoEntry)
+            DrawClockwiseStripeBorder(memDC, rc, data->stripeOffset);
+        break;
+#endif
     default:
         break;
     }
@@ -490,12 +643,24 @@ static void PaintGameWindow(HWND hwnd, int index)
     /* 制限なしリサイズ+反転ウィンドウが負の論理サイズ（反転状態）にある場合、
        実HWNDは常に正サイズのままだが、描画内容だけをStretchBltの負幅/負高さ
        指定でミラーする。プレイヤーの衝突判定は実HWNDの矩形しか見ないため、
-       これは純粋に見た目だけの効果。 */
-    int flipX = (data->kind == WT_UNCONSTRAINED || data->kind == WT_UNCONSTRAINED_NOENTRY) && data->logicalW < 0;
-    int flipY = (data->kind == WT_UNCONSTRAINED || data->kind == WT_UNCONSTRAINED_NOENTRY) && data->logicalH < 0;
+       これは純粋に見た目だけの効果。
+       子/孫ウィンドウは自分自身が反転しているわけではないが、反転した
+       祖先の内部に描かれている以上、見た目上はその祖先と一緒に鏡映される
+       べき。ただしこれは「今その祖先の内部にいるか」をその場で判定する
+       のではなく、inheritedFlipX/Yという積算済みの状態を使う -- 一度
+       反転した見た目は、親から切り離されても、再度どこかの祖先が反転する
+       まで元に戻らない（Hierarchy_ToggleInheritedFlip/UpdateUnconstrained
+       参照）。 */
+    int flipX, flipY;
+    GameWindow_GetEffectiveFlip(data, &flipX, &flipY);
     if (flipX || flipY)
     {
-        StretchBlt(hdc, flipX ? w : 0, flipY ? h : 0, flipX ? -w : w, flipY ? -h : h,
+        /* 負の幅/高さを指定するミラー手法のGDI特有の癖: 原点をwidth/height
+           そのものにすると、境界の1列/1行がステップ丸めの都合で描画されずに
+           残ることがある（PaintPlayerで黒い線として顕在化した不具合と同じ
+           原因）。原点をwidth-1/height-1にすることでその境界も確実に
+           上書きされる。 */
+        StretchBlt(hdc, flipX ? w - 1 : 0, flipY ? h - 1 : 0, flipX ? -w : w, flipY ? -h : h,
                    memDC, 0, 0, w, h, SRCCOPY);
     }
     else
@@ -522,6 +687,17 @@ static LRESULT CALLBACK GameWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
     case WM_LBUTTONDOWN:
         if (index >= 0)
         {
+#ifdef ENABLE_STAGE_EDITOR
+            /* パレットアイコンはクリック即選択ではなく、ドラッグ&ドロップで
+               配置する（Editor_UpdatePaletteDragsが毎フレーム追従させ、
+               WM_LBUTTONUPで実際の配置とホームポジションへの復帰を行う）。
+               固定UIなのでZ-order操作自体も不要。 */
+            if (g_windows[index].kind == WT_BTN_PALETTE)
+            {
+                Editor_StartPaletteDrag(index);
+                return 0;
+            }
+#endif
             ZOrder_BringToFront(hwnd);
             if (IsButtonKind(g_windows[index].kind))
                 Strategy_HandleButtonClick(g_windows[index].kind);
@@ -531,7 +707,16 @@ static LRESULT CALLBACK GameWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
         return 0;
     case WM_LBUTTONUP:
         if (index >= 0)
+        {
+#ifdef ENABLE_STAGE_EDITOR
+            if (g_windows[index].kind == WT_BTN_PALETTE)
+            {
+                Editor_EndPaletteDrag(index);
+                return 0;
+            }
+#endif
             Strategy_HandleMouseUp(index);
+        }
         return 0;
     case WM_PAINT:
         if (index >= 0)
@@ -634,88 +819,8 @@ int CreateGameWindowIndexed(HINSTANCE hInstance, WindowKind kind, int x, int y, 
         return -1;
 
     COLORREF bg, fg;
-    int solid = 1;
-    int isNoEntry = 0;
-    switch (kind)
-    {
-    case WT_NORMAL_BLACK:
-        bg = RGB(0, 0, 0);
-        fg = RGB(255, 255, 255);
-        break;
-    case WT_NORMAL_WHITE:
-        bg = RGB(255, 255, 255);
-        fg = RGB(0, 0, 0);
-        break;
-    case WT_TEXT_DISPLAY:
-        bg = RGB(0, 0, 0);
-        fg = RGB(255, 255, 255);
-        solid = 0;
-        break;
-    case WT_MOVABLE:
-        bg = RGB(173, 216, 230);
-        fg = RGB(0, 0, 0);
-        break;
-    case WT_RESIZABLE:
-        bg = RGB(144, 238, 144);
-        fg = RGB(0, 0, 0);
-        break;
-    case WT_MINIMIZABLE:
-    case WT_DELETABLE:
-        bg = RGB(255, 182, 193);
-        fg = RGB(0, 0, 0);
-        break;
-    case WT_NORMAL_BLACK_NOENTRY:
-        bg = RGB(0, 0, 0);
-        fg = RGB(255, 255, 255);
-        isNoEntry = 1;
-        break;
-    case WT_NORMAL_WHITE_NOENTRY:
-        bg = RGB(255, 255, 255);
-        fg = RGB(0, 0, 0);
-        isNoEntry = 1;
-        break;
-    case WT_RESIZABLE_NOENTRY:
-        bg = RGB(144, 238, 144);
-        fg = RGB(0, 0, 0);
-        isNoEntry = 1;
-        break;
-    case WT_MOVABLE_NOENTRY:
-        bg = RGB(173, 216, 230);
-        fg = RGB(0, 0, 0);
-        isNoEntry = 1;
-        break;
-    case WT_MINIMIZABLE_NOENTRY:
-        bg = RGB(255, 182, 193);
-        fg = RGB(0, 0, 0);
-        isNoEntry = 1;
-        break;
-    case WT_UNCONSTRAINED:
-        bg = RGB(221, 160, 221);
-        fg = RGB(0, 0, 0);
-        break;
-    case WT_UNCONSTRAINED_NOENTRY:
-        bg = RGB(221, 160, 221);
-        fg = RGB(0, 0, 0);
-        isNoEntry = 1;
-        break;
-    case WT_GOAL:
-        bg = RGB(255, 0, 255);
-        fg = RGB(255, 215, 0);
-        solid = 0;
-        break;
-    case WT_BTN_START:
-    case WT_BTN_RETRY:
-    case WT_BTN_TOTITLE:
-    case WT_BTN_EXIT:
-        bg = RGB(200, 200, 200);
-        fg = RGB(0, 0, 0);
-        solid = 0;
-        break;
-    default:
-        bg = RGB(128, 128, 128);
-        fg = RGB(255, 255, 255);
-        break;
-    }
+    int solid, isNoEntry;
+    GetKindAppearance(kind, &bg, &fg, &solid, &isNoEntry);
 
     DWORD style, exStyle;
     if (kind == WT_GOAL)
@@ -731,6 +836,13 @@ int CreateGameWindowIndexed(HINSTANCE hInstance, WindowKind kind, int x, int y, 
            しまう。 */
         style = WS_POPUP | WS_VISIBLE;
         exStyle = WS_EX_TOPMOST;
+#ifdef ENABLE_STAGE_EDITOR
+        /* パレットアイコンだけはWS_EX_LAYEREDも付けておく -- ドラッグ中に
+           SetLayeredWindowAttributes(..., LWA_ALPHA)で半透明化するため。
+           待機中はアルファ255（不透明）で通常のウィンドウと見た目は変わらない。 */
+        if (kind == WT_BTN_PALETTE)
+            exStyle |= WS_EX_LAYERED;
+#endif
     }
     else
     {
@@ -752,6 +864,14 @@ int CreateGameWindowIndexed(HINSTANCE hInstance, WindowKind kind, int x, int y, 
     {
         SetLayeredWindowAttributes(hwnd, RGB(255, 0, 255), 0, LWA_COLORKEY);
     }
+#ifdef ENABLE_STAGE_EDITOR
+    else if (kind == WT_BTN_PALETTE)
+    {
+        /* WS_EX_LAYEREDウィンドウは一度もSetLayeredWindowAttributesを呼ばないと
+           正しく描画されないことがあるため、待機時の不透明状態を明示しておく。 */
+        SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+    }
+#endif
     /* WS_SYSMENUを付けなくなったため、システムメニュー経由のSC_CLOSE無効化は
        不要（閉じるボタン自体がOS側に存在しない）。 */
 

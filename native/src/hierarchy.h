@@ -1,6 +1,8 @@
 #ifndef HIERARCHY_H
 #define HIERARCHY_H
 
+#include <windows.h>
+
 void Hierarchy_Attach(int parentIdx, int childIdx);
 void Hierarchy_Detach(int childIdx);
 
@@ -20,6 +22,25 @@ void Hierarchy_RecordOriginalSizes(int rootIndex);
    呼び出し、UpdateTargetPositionは呼び出さないため、子要素は絶対スクリーン位置
    を保ったまま拡大縮小のみ行う。 */
 void Hierarchy_ApplyScale(int rootIndex, float scaleX, float scaleY);
+
+/* Hierarchy_ApplyScaleの「相対位置も保つ」版。WT_UNCONSTRAINED(制限なし
+   リサイズ+反転ウィンドウ)専用: アンカー基準の反転により親の可視矩形の
+   左上そのものが動く/反転しうるため、子の絶対位置を固定したままサイズだけ
+   変えるとcの相対配置が崩れる。`oldRect`はrootIndex自身のジェスチャー開始時
+   点の可視矩形、`newRect`は現在フレームでの可視矩形。子（Goal/ボタンを除く）
+   はrootIndexに対する相対オフセット・相対サイズを保ったまま追従する。
+   Player/Goal/ボタンはHierarchy_ApplyScaleと同じ「サイズのみ変更、位置固定」
+   のまま扱う（内部でApplyScaleToSpecialChildren相当を呼ぶ）。 */
+void Hierarchy_ApplyRelativeTransform(int rootIndex, RECT oldRect, RECT newRect);
+
+/* `rootIndex`が今まさに反転イベントを起こした瞬間に一度だけ呼ぶ。その時点の
+   全子孫（Hierarchy_ApplyRelativeTransformと違い、Goal/ボタンも含め無条件）の
+   GameWindowData.inheritedFlipX/YをXORで反転させる。これは「今その祖先の
+   内部にいるか」をその場で判定するライブ計算ではなく、一度反転した見た目が
+   親から切り離された後も、再度どこかの祖先が反転するまで元に戻らないための
+   永続フラグの更新。toggleX/toggleYはこのイベントで反転した軸だけtrueにする
+   （UpdateUnconstrainedがこのフレームでの新旧反転状態を比較して呼び出す）。 */
+void Hierarchy_ToggleInheritedFlip(int rootIndex, int toggleX, int toggleY);
 
 int Hierarchy_IsDescendantOf(int candidateIndex, int ancestorIndex);
 

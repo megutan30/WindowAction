@@ -15,6 +15,13 @@ typedef struct {
     int parentIdx; /* -1 = どのウィンドウの内部にもいない（C#のPlayerForm.Parentに対応） */
     int isMinimized; /* フリーズ状態: 親だったウィンドウが最小化された */
     int lastValidParentIdx; /* Player_OnRestore のために記憶しておく、lastValidParent に対応 */
+    /* GameWindowData.inheritedFlipX/Yと同じ仕組み(Hierarchy_ToggleInheritedFlip
+       参照): 制限なしリサイズウィンドウの子として乗っている間にその祖先が
+       反転する「たびに」XORで積算される永続フラグ。親から離れても値は
+       保持され、再度どこかの祖先が反転するまで変化しない。inheritedFlipYは
+       見た目のミラー描画だけでなく、重力とジャンプの向きの反転にも使う
+       （上下逆さの床/天井の上に立つ）。inheritedFlipXは見た目のみ。 */
+    int inheritedFlipX, inheritedFlipY;
     HWND hwnd;
     PlayerAnimation anim;
 } Player;

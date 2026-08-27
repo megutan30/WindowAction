@@ -44,7 +44,18 @@ typedef enum {
     WT_BTN_START,
     WT_BTN_RETRY,
     WT_BTN_TOTITLE,
-    WT_BTN_EXIT
+    WT_BTN_EXIT,
+#ifdef ENABLE_STAGE_EDITOR
+    /* ステージエディター（テストステージ）専用。開発ビルド(build.bat dev)
+       でのみ存在する -- 本番ビルドにはコンパイル自体されない。
+       背景用のキャンバスは廃止し、本物のデスクトップがそのまま見える/床になる
+       （通常プレイでウィンドウの外にいる場合と同じ挙動）。 */
+    WT_BTN_PALETTE,    /* ドラッグ&ドロップで配置する小さなパレットアイコン。
+                          実際の種別はGameWindowData.paletteKind */
+    WT_BTN_TEST,       /* タイトル画面の「Test」ボタン */
+    WT_BTN_EXPORT,     /* 配置内容をstage_export.txtへ書き出す */
+    WT_BTN_RESET,      /* テストステージを空の状態に作り直す */
+#endif
 } WindowKind;
 
 typedef struct {
@@ -99,6 +110,14 @@ typedef struct {
     int logicalW, logicalH;
     POINT unconstrainedAnchor; /* ドラッグ開始時に固定される左上アンカー点（スクリーン座標） */
 
+    /* 祖先の制限なしリサイズが反転する「たびに」XORで積算される見た目だけの
+       ミラーフラグ。ウィンドウ自身の種別に関わらず持つ（子孫すべてが対象）。
+       親から切り離されても値はそのまま保持され、再度いずれかの祖先が反転
+       イベントを起こすまで変化しない（Hierarchy_ToggleInheritedFlip参照）。
+       描画時はこれと自分自身の反転状態(WT_UNCONSTRAINED*かつlogicalW/H<0)を
+       XORした結果を最終的な見た目の反転として使う（PaintGameWindow参照）。 */
+    int inheritedFlipX, inheritedFlipY;
+
     /* 最小化/復元のカスタム縮小・拡大アニメーション状態。WS_CAPTIONを外した
        ことでOS標準の最小化ジーニーアニメーションが使えなくなった代替
        （MinimizeAnim_UpdateAll参照）。0=アニメーションなし、1=最小化中
@@ -108,6 +127,20 @@ typedef struct {
     float minimizeAnimT;
     RECT minimizeAnimFrom;
     RECT minimizeAnimTo;
+
+#ifdef ENABLE_STAGE_EDITOR
+    /* WT_BTN_PALETTEの場合のみ意味を持つ: ドラッグでどの種別を配置するか、
+       ドラッグ終了後にどの位置・サイズへ戻るか。paletteIsNoEntryは
+       paletteKindがNoEntry系かどうか（アイコンに縞模様枠を描くかの判定用、
+       GetKindAppearanceの結果をEditor_LoadTestStageで一度だけ計算して
+       キャッシュしておく）。paletteIconSizeはドラッグしていない時の
+       アイコンサイズ、ドラッグ中はEDITOR_DEFAULT_SIZE相当まで拡大される。 */
+    WindowKind paletteKind;
+    int paletteIsNoEntry;
+    POINT paletteHomePos;
+    SIZE paletteIconSize;
+    int paletteDragging;
+#endif
 } GameWindowData;
 
 extern GameWindowData g_windows[MAX_WINDOWS];
@@ -148,6 +181,18 @@ void MinimizeAnim_UpdateAll(float dt);
    にだけ呼び出す（CreateGameWindow自体のシグネチャは変更しない）。 */
 void SetWindowAppearance(int index, COLORREF titleBarBg, COLORREF titleBarFg,
                           COLORREF outlineColor, const char *titleText);
+
+/* kind別のデフォルトisNoEntryだけを取り出す軽量アクセサ（ステージエディターの
+   パレットアイコンが、実際には生成していないkindのNoEntry表示を借りるため）。 */
+int WindowKind_IsNoEntry(WindowKind kind);
+
+/* このウィンドウが現在、実際に見た目としてミラー描画されている軸を返す
+   （PaintGameWindowのStretchBlt判定と厳密に一致させる）:
+   自分自身がWT_UNCONSTRAINED*で負の論理サイズを持つ状態(own)と、
+   祖先の反転イベントで積算された永続フラグ(inherited)のXOR。
+   WindowQuery_GetClientBounds（タイトルバー帯を上端/下端どちらから
+   除外するか）など、描画以外で「今の見た目の向き」が必要な箇所からも呼ぶ。 */
+void GameWindow_GetEffectiveFlip(const GameWindowData *data, int *outFlipX, int *outFlipY);
 
 /* Deletable戦略: 子要素を切り離し（破棄はせず親なし状態にする）、ウィンドウ自身も
    その親から切り離した上で破棄する。DeletableWindowStrategy.RemoveAndCloseと一致させる。

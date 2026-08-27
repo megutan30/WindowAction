@@ -169,7 +169,33 @@ static void PaintPlayer(HWND hwnd)
         }
     }
 
-    BitBlt(hdc, 0, 0, rc.right - rc.left, rc.bottom - rc.top, memDC, 0, 0, SRCCOPY);
+    /* 制限なしリサイズウィンドウの子(GameWindow.PaintGameWindow)と同じ仕組み:
+       乗っている(乗っていた)祖先が反転した回数のパリティをinheritedFlipX/Yに
+       永続的に積算しており、それに応じて描画内容だけをStretchBltの負幅/
+       負高さでミラーする。実HWNDの矩形自体は変えない(見た目だけの効果)。 */
+    int flipX = g_activePlayer && g_activePlayer->inheritedFlipX;
+    int flipY = g_activePlayer && g_activePlayer->inheritedFlipY;
+    int fullW2 = rc.right - rc.left;
+    int fullH2 = rc.bottom - rc.top;
+    if (flipX || flipY)
+    {
+        /* 負の幅/高さを指定するミラー手法のGDI特有の癖: 原点をwidth/height
+           そのものにすると、境界の1列/1行がステップ丸めの都合で描画されずに
+           残り、コピー先の初期内容（レイヤードウィンドウの黒い初期背景）が
+           カラーキーで抜けずそのまま黒い線として見えてしまう。原点を
+           width-1/height-1にすることでその境界列/行も確実に上書きされるが、
+           念のためhdc自体も先にカラーキーで塗っておき、それでも残る
+           取りこぼし画素があれば黒ではなく透明として抜けるようにする。 */
+        HBRUSH hdcKeyBrush = CreateSolidBrush(RGB(255, 0, 255));
+        FillRect(hdc, &rc, hdcKeyBrush);
+        DeleteObject(hdcKeyBrush);
+        StretchBlt(hdc, flipX ? fullW2 - 1 : 0, flipY ? fullH2 - 1 : 0, flipX ? -fullW2 : fullW2, flipY ? -fullH2 : fullH2,
+                   memDC, 0, 0, fullW2, fullH2, SRCCOPY);
+    }
+    else
+    {
+        BitBlt(hdc, 0, 0, fullW2, fullH2, memDC, 0, 0, SRCCOPY);
+    }
     SelectObject(memDC, oldBmp);
     DeleteObject(memBmp);
     DeleteDC(memDC);
@@ -257,6 +283,8 @@ HWND CreatePlayerWindow(HINSTANCE hInstance, Player *p, int startX, int startY)
     p->parentIdx = -1;
     p->isMinimized = 0;
     p->lastValidParentIdx = -1;
+    p->inheritedFlipX = 0;
+    p->inheritedFlipY = 0;
     Anim_Init(&p->anim);
 
     int dx, dy, dw, dh;
@@ -328,6 +356,8 @@ void Player_Reset(Player *p, int startX, int startY)
     p->parentIdx = -1;
     p->isMinimized = 0;
     p->lastValidParentIdx = -1;
+    p->inheritedFlipX = 0;
+    p->inheritedFlipY = 0;
     Anim_Init(&p->anim);
     if (p->hwnd)
     {
@@ -425,6 +455,12 @@ void Player_ApplyParentScale(Player *p, int windowIndex, float scaleX, float sca
 
 static int SignOf(float v) { return v > 0 ? 1 : (v < 0 ? -1 : 0); }
 
+/* +1 = 通常の重力(下方向)、-1 = 反転(上方向、乗っている制限なしリサイズ
+   ウィンドウが上下反転した状態)。inheritedFlipYはHierarchy_ToggleInheritedFlip
+   により、実際に祖先が反転した瞬間だけXORで積算される永続フラグなので、
+   親から離れても向きはそのまま保たれる。 */
+static int GravDir(const Player *p) { return p->inheritedFlipY ? -1 : 1; }
+
 static void CheckHorizontalCollision(RECT bounds, float *moveX)
 {
     if (fabsf(*moveX) < 0.1f)
@@ -513,7 +549,7 @@ static void CheckHorizontalCollision(RECT bounds, float *moveX)
     }
 }
 
-static void CheckVerticalCollision(RECT bounds, float *moveY, int *hitCeiling)
+static void CheckVerticalCollision(RECT bounds, float *moveY, int *hitCeiling, int gravDir)
 {
     if (fabsf(*moveY) < 0.1f)
         return;
@@ -602,8 +638,20 @@ static void CheckVerticalCollision(RECT bounds, float *moveY, int *hitCeiling)
         }
     }
 
-    if (original < 0.0f && *moveY > original)
-        *hitCeiling = 1;
+    /* hitCeilingは「接地面から離れる向き(=ジャンプ方向、重力と逆)の移動が
+       ブロックされた」ことを意味する。通常重力(gravDir>0)ではジャンプは
+       -Y方向なので元のoriginal<0のケース、反転重力(gravDir<0)ではジャンプは
+       +Y方向になるためoriginal>0のケースを見る。 */
+    if (gravDir > 0)
+    {
+        if (original < 0.0f && *moveY > original)
+            *hitCeiling = 1;
+    }
+    else
+    {
+        if (original > 0.0f && *moveY < original)
+            *hitCeiling = 1;
+    }
 }
 
 /* ---- IsValidMove / AdjustMovement: 現在の親を中心とした移動可能領域
@@ -647,7 +695,7 @@ static int IsValidMove(RECT bounds, int parentIdx)
     return 1;
 }
 
-static RECT AdjustMovement(RECT oldBounds, RECT target, int parentIdx, int *hitCeiling)
+static RECT AdjustMovement(RECT oldBounds, RECT target, int parentIdx, int *hitCeiling, int gravDir)
 {
     RECT adj = oldBounds;
 
@@ -676,7 +724,10 @@ static RECT AdjustMovement(RECT oldBounds, RECT target, int parentIdx, int *hitC
                 adj = test;
             else
             {
-                if (step < 0)
+                /* ジャンプ方向(接地面から離れる向き)でブロックされた時だけ
+                   hitCeilingを立てる。通常重力ではstep<0(上方向)、反転重力では
+                   step>0(下方向)がそれにあたる。 */
+                if (step == -gravDir)
                     *hitCeiling = 1;
                 break;
             }
@@ -690,7 +741,7 @@ static RECT AdjustMovement(RECT oldBounds, RECT target, int parentIdx, int *hitC
    交差する各ソリッドウィンドウ/ボタンを完全なボックス（床/天井/壁）として
    扱う。 ---- */
 
-static RECT BoxCollideAgainst(RECT proposed, RECT current, HWND hwnd, int *hitCeiling)
+static RECT BoxCollideAgainst(RECT proposed, RECT current, HWND hwnd, int *hitCeiling, int gravDir)
 {
     RECT wb;
     GetWindowFullBounds(hwnd, &wb);
@@ -704,17 +755,23 @@ static RECT BoxCollideAgainst(RECT proposed, RECT current, HWND hwnd, int *hitCe
     int width = proposed.right - proposed.left;
     int height = proposed.bottom - proposed.top;
     RECT adj = proposed;
+    /* ジャンプ方向(接地面から離れる向き)は常に重力と逆。通常重力では上方向
+       (このブロックの下側の分岐)、反転重力では下方向(上側の分岐)がそれに
+       あたるため、hitCeilingを立てる分岐をgravDirで切り替える。 */
+    int jumpDir = -gravDir;
 
     if (current.bottom <= wb.top && adj.bottom > wb.top)
     {
         adj.top = wb.top - height;
         adj.bottom = wb.top;
+        if (hitCeiling && jumpDir > 0)
+            *hitCeiling = 1;
     }
     else if (current.top >= wb.bottom && adj.top < wb.bottom)
     {
         adj.top = wb.bottom;
         adj.bottom = wb.bottom + height;
-        if (hitCeiling)
+        if (hitCeiling && jumpDir < 0)
             *hitCeiling = 1;
     }
     else if (current.right <= wb.left && adj.right > wb.left)
@@ -730,7 +787,7 @@ static RECT BoxCollideAgainst(RECT proposed, RECT current, HWND hwnd, int *hitCe
     return adj;
 }
 
-static RECT HandleWindowCollisions(RECT proposed, RECT current, int *hitCeiling)
+static RECT HandleWindowCollisions(RECT proposed, RECT current, int *hitCeiling, int gravDir)
 {
     RECT adjusted = proposed;
     for (int i = 0; i < g_windowCount; i++)
@@ -741,12 +798,12 @@ static RECT HandleWindowCollisions(RECT proposed, RECT current, int *hitCeiling)
         if (!d->hwnd || d->minimized)
             continue;
 
-        adjusted = BoxCollideAgainst(adjusted, current, d->hwnd, hitCeiling);
+        adjusted = BoxCollideAgainst(adjusted, current, d->hwnd, hitCeiling, gravDir);
     }
     return adjusted;
 }
 
-static RECT HandleButtonCollisions(RECT proposed, RECT current, int *hitCeiling)
+static RECT HandleButtonCollisions(RECT proposed, RECT current, int *hitCeiling, int gravDir)
 {
     RECT adjusted = proposed;
     for (int i = 0; i < g_windowCount; i++)
@@ -754,7 +811,7 @@ static RECT HandleButtonCollisions(RECT proposed, RECT current, int *hitCeiling)
         GameWindowData *d = &g_windows[i];
         if (!IsButtonWindowKind(d->kind) || !d->hwnd)
             continue;
-        adjusted = BoxCollideAgainst(adjusted, current, d->hwnd, hitCeiling);
+        adjusted = BoxCollideAgainst(adjusted, current, d->hwnd, hitCeiling, gravDir);
     }
     return adjusted;
 }
@@ -779,11 +836,43 @@ static void HandleWindowTransitions(Player *p, RECT newBounds)
     }
 }
 
-/* ---- CheckGrounded: 外側 = ウィンドウの上面 + NoEntry + 画面の下端;
-   内側 = 同じくウィンドウの上面（ネストしたプラットフォーム）+ 親自身の
-   クライアント下端を部屋の床として扱う。 ---- */
+/* GetWindowFullBoundsのTopは実際にはウィンドウ外枠の最上端であり、`w`自身が
+   反転していない限りゲーム描画のタイトルバー帯を含む（CLAUDE.md
+   CollisionBounds参照）。この辺を「上から乗る天井/床」ではなく「下から
+   頭をぶつける天井」として使う場合、外枠の一番上まで潜り込ませると
+   タイトルバーに埋まって見える -- タイトルバー自体を天井として、その下端
+   で止める必要がある。`w`自身が反転していれば、タイトルバーは既に見た目上
+   下端に移動しているため無調整でよい（CheckGroundedInvertedの内側判定用）。 */
+static int CeilingContactY(const GameWindowData *w, RECT wb)
+{
+    int flipX, flipY;
+    GameWindow_GetEffectiveFlip(w, &flipX, &flipY);
+    int hasChrome = w->kind != WT_GOAL && !IsButtonWindowKind(w->kind);
+    return (hasChrome && !flipY) ? (wb.top + TITLE_BAR_HEIGHT) : wb.top;
+}
 
-static void CheckGrounded(Player *p, float dt)
+/* CeilingContactYの下端版: `w`の本当の床のY座標。`w`自身が反転している
+   場合、タイトルバーは見た目上その底辺(wb.bottom側)に移動しているため、
+   そこに足/頭が触れる着地面としてはタイトルバー帯の分だけ手前
+   (wb.bottom - TITLE_BAR_HEIGHT)で止める必要がある -- そうしないと
+   反転していないプレイヤーが反転した部屋の床に着地した時にタイトルバーへ
+   めり込む（CheckGroundedNormalの内側判定）のと、反転したプレイヤーが
+   反転していない部屋の天井の下から接触する時（CheckGroundedInvertedの
+   外側判定）の両方で使う。`w`自身が反転していなければタイトルバーは
+   通常通り上端にあるため、床(wb.bottom)は無調整でよい。 */
+static int FloorContactY(const GameWindowData *w, RECT wb)
+{
+    int flipX, flipY;
+    GameWindow_GetEffectiveFlip(w, &flipX, &flipY);
+    int hasChrome = w->kind != WT_GOAL && !IsButtonWindowKind(w->kind);
+    return (hasChrome && flipY) ? (wb.bottom - TITLE_BAR_HEIGHT) : wb.bottom;
+}
+
+/* ---- CheckGroundedNormal: 外側 = ウィンドウの上面 + NoEntry + 画面の下端;
+   内側 = 同じくウィンドウの上面（ネストしたプラットフォーム）+ 親自身の
+   クライアント下端を部屋の床として扱う。通常重力(GravDir>0)用。 ---- */
+
+static void CheckGroundedNormal(Player *p, float dt)
 {
     if (p->vy < 0.0f)
     {
@@ -936,14 +1025,20 @@ static void CheckGrounded(Player *p, float dt)
                 continue;
             RECT wb;
             GetWindowFullBounds(w->hwnd, &wb);
+            /* wが上下反転している場合、そのタイトルバーは見た目上wb.bottom側に
+               移動しているため、本当の床はwb.bottomそのものではなく
+               FloorContactYがタイトルバー帯の分だけ手前に補正した位置になる
+               -- そうしないと反転していないプレイヤーが反転した部屋の床に
+               着地した時にタイトルバーへめり込んでしまう。 */
+            int floorY = FloorContactY(w, wb);
             /* オリジナルのRectangle(x,y,w,h)形式では
                windowGroundArea = (Left, Bottom-maxStep-5, Width, maxStep+10)
                -> bottom = Bottom+5であり、+10ではない。 */
-            RECT groundArea = {wb.left, wb.bottom - (int)maxStep - 5, wb.right, wb.bottom + 5};
+            RECT groundArea = {wb.left, floorY - (int)maxStep - 5, wb.right, floorY + 5};
             if (!RectsOverlap(currentFeetBounds, groundArea))
                 continue;
 
-            int groundY = wb.bottom;
+            int groundY = floorY;
             int isFloorVisible = 1;
             int myZ = ZOrder_GetIndex(w->hwnd);
             for (int m = 0; m < n; m++)
@@ -989,6 +1084,210 @@ static void CheckGrounded(Player *p, float dt)
     }
 
     p->grounded = 0;
+}
+
+/* ---- CheckGroundedInverted: CheckGroundedNormalの上下ミラー版。乗っている
+   制限なしリサイズウィンドウが上下反転した状態(GravDir<0)のとき、プレイヤーは
+   天井に張り付く。全ての「床」判定を「天井」判定に置き換える:
+   接地面=障害物の上面(obstacle.top)ではなく下面(obstacle.bottom)、
+   接触するのはプレイヤーの足元(bottom)ではなく頭(top)、画面端は下端では
+   なく上端(y=0)。CheckGroundedNormalと1対1で対応するよう意図的に並行した
+   構造を保っている(ロジックの共有ではなく可読性・保守性を優先)。 ---- */
+
+static void CheckGroundedInverted(Player *p, float dt)
+{
+    if (p->vy > 0.0f)
+    {
+        p->grounded = 0;
+        return;
+    }
+
+    int headX = (int)p->x;
+    int headY = (int)p->y + 10;
+    int headW = p->width;
+
+    float maxStep = fabsf(p->vy * dt);
+    if (maxStep < 20.0f)
+        maxStep = 20.0f;
+
+    int sweepBottom = (int)fmaxf((float)headY, headY + p->vy * dt) + 5;
+    int sweepTop = headY - GROUND_CHECK_H - 10 - (int)maxStep;
+    RECT sweep = {headX, sweepTop, headX + headW, sweepBottom};
+
+    int playerLeft = (int)p->x;
+    int playerRight = (int)p->x + p->width;
+    int playerTop = (int)p->y;
+
+    for (int i = 0; i < g_noEntryZoneCount; i++)
+    {
+        RECT z = g_noEntryZones[i];
+        if (!RectsOverlap(sweep, z))
+            continue;
+        if (playerTop <= z.bottom && playerTop >= z.bottom - 5 &&
+            playerRight > z.left && playerLeft < z.right)
+        {
+            p->grounded = 1;
+            p->y = (float)z.bottom;
+            p->vy = 0.0f;
+            return;
+        }
+    }
+
+    for (int i = 0; i < g_windowCount; i++)
+    {
+        if (!g_windows[i].isNoEntry || !g_windows[i].hwnd || g_windows[i].minimized)
+            continue;
+        RECT bnd[4]; /* NoEntry_GetBoundaryRectsによる順序: 上, 下, 左, 右 */
+        int c = NoEntry_GetBoundaryRects(i, bnd);
+        for (int b = 0; b < c; b++)
+        {
+            RECT band = bnd[b];
+            if (!RectsOverlap(sweep, band))
+                continue;
+            RECT visBand;
+            IntersectRect(&visBand, &sweep, &band);
+            if (!NoEntry_IsRectVisibleFromWindow(i, visBand))
+                continue; /* より前面のウィンドウに隠れている */
+            if (playerTop <= band.bottom && playerTop >= band.bottom - 5 &&
+                playerRight > band.left && playerLeft < band.right)
+            {
+                p->grounded = 1;
+                p->y = (float)band.bottom;
+                p->vy = 0.0f;
+                return;
+            }
+            break;
+        }
+    }
+
+    for (int i = 0; i < g_windowCount; i++)
+    {
+        if (!IsButtonWindowKind(g_windows[i].kind))
+            continue;
+        RECT wb;
+        GetWindowFullBounds(g_windows[i].hwnd, &wb);
+        if (!RectsOverlap(sweep, wb))
+            continue;
+        if (playerTop <= wb.bottom && playerTop >= wb.bottom - 5 &&
+            playerRight > wb.left && playerLeft < wb.right)
+        {
+            p->grounded = 1;
+            p->y = (float)wb.bottom;
+            p->vy = 0.0f;
+            return;
+        }
+    }
+
+    RECT currentHeadBounds = {headX, headY - GROUND_CHECK_H, headX + headW, headY};
+    int idxs[MAX_INTERSECTING];
+    int n = GatherIntersectingWindows(sweep, idxs, MAX_INTERSECTING);
+
+    if (p->parentIdx < 0)
+    {
+        for (int k = 0; k < n; k++)
+        {
+            GameWindowData *d = &g_windows[idxs[k]];
+            if (d->isNoEntry)
+                continue;
+            RECT wb;
+            GetWindowFullBounds(d->hwnd, &wb);
+            int contactY = FloorContactY(d, wb);
+            if (playerTop > contactY || playerTop < contactY - 5 ||
+                playerRight <= wb.left || playerLeft >= wb.right)
+                continue;
+
+            int isGroundValid = 1;
+            int myZ = ZOrder_GetIndex(d->hwnd);
+            for (int m = 0; m < n; m++)
+            {
+                GameWindowData *other = &g_windows[idxs[m]];
+                if (ZOrder_GetIndex(other->hwnd) <= myZ)
+                    continue;
+                RECT ob;
+                GetWindowFullBounds(other->hwnd, &ob);
+                if (RectsOverlap(ob, currentHeadBounds))
+                {
+                    isGroundValid = 0;
+                    break;
+                }
+            }
+            if (isGroundValid)
+            {
+                p->grounded = 1;
+                p->y = (float)contactY;
+                p->vy = 0.0f;
+                return;
+            }
+        }
+    }
+    else
+    {
+        int bestTop = INT_MIN;
+        for (int k = 0; k < n; k++)
+        {
+            GameWindowData *w = &g_windows[idxs[k]];
+            if (w->isNoEntry)
+                continue;
+            RECT wb;
+            GetWindowFullBounds(w->hwnd, &wb);
+            int contactY = CeilingContactY(w, wb);
+            RECT ceilingArea = {wb.left, contactY - 5, wb.right, contactY + (int)maxStep + 5};
+            if (!RectsOverlap(currentHeadBounds, ceilingArea))
+                continue;
+
+            int ceilingY = contactY;
+            int isCeilingVisible = 1;
+            int myZ = ZOrder_GetIndex(w->hwnd);
+            for (int m = 0; m < n; m++)
+            {
+                GameWindowData *other = &g_windows[idxs[m]];
+                if (ZOrder_GetIndex(other->hwnd) <= myZ)
+                    continue;
+                RECT ob;
+                GetWindowFullBounds(other->hwnd, &ob);
+                RECT ceilBandArea = {headX, ceilingY - 2, headX + headW, ceilingY + 2};
+                int contains = ob.left <= ceilBandArea.left && ob.top <= ceilBandArea.top &&
+                               ob.right >= ceilBandArea.right && ob.bottom >= ceilBandArea.bottom;
+                int overlapsAndBelow = RectsOverlap(ob, ceilBandArea) && ob.top > ceilingY;
+                if (contains || overlapsAndBelow)
+                {
+                    isCeilingVisible = 0;
+                    break;
+                }
+            }
+            if (isCeilingVisible && ceilingY > bestTop)
+                bestTop = ceilingY;
+        }
+
+        if (bestTop != INT_MIN)
+        {
+            p->grounded = 1;
+            p->y = (float)bestTop;
+            p->vy = 0.0f;
+            return;
+        }
+    }
+
+    if (p->parentIdx < 0)
+    {
+        if (playerTop <= 0)
+        {
+            p->grounded = 1;
+            p->y = 0.0f;
+            p->vy = 0.0f;
+            return;
+        }
+    }
+
+    p->grounded = 0;
+}
+
+static void CheckGrounded(Player *p, float dt)
+{
+    if (GravDir(p) > 0)
+        CheckGroundedNormal(p, dt);
+    else
+        CheckGroundedInverted(p, dt);
 }
 
 /* PlayerForm.CalculateDistanceToMovableBoundsTopと一致させる: プレイヤーの
@@ -1073,6 +1372,7 @@ void Player_Update(Player *p, float dt)
         return;
 
     int wasGrounded = p->grounded;
+    int gravDir = GravDir(p);
 
     /* PlayerInputHandler.UpdateFacingは左を先にチェックして即座にreturnするため、
        両方向が同時に押されている場合は左が優先される。 */
@@ -1084,7 +1384,8 @@ void Player_Update(Player *p, float dt)
     if (p->grounded &&
         (GetAsyncKeyState(VK_SPACE) & 0x8000 || GetAsyncKeyState(VK_UP) & 0x8000 || GetAsyncKeyState('W') & 0x8000))
     {
-        p->vy = -JUMP_FORCE;
+        /* ジャンプは常に接地面から離れる向き = 重力と逆方向。 */
+        p->vy = -JUMP_FORCE * gravDir;
         p->grounded = 0;
         Anim_StartJump(&p->anim);
     }
@@ -1107,7 +1408,7 @@ void Player_Update(Player *p, float dt)
 
     CheckHorizontalCollision(current, &moveX);
     int hitCeiling = 0;
-    CheckVerticalCollision(current, &moveY, &hitCeiling);
+    CheckVerticalCollision(current, &moveY, &hitCeiling, gravDir);
     if (hitCeiling)
     {
         p->vy = 0.0f;
@@ -1120,7 +1421,7 @@ void Player_Update(Player *p, float dt)
     if (!IsValidMove(proposed, p->parentIdx))
     {
         int ceil2 = 0;
-        proposed = AdjustMovement(current, proposed, p->parentIdx, &ceil2);
+        proposed = AdjustMovement(current, proposed, p->parentIdx, &ceil2, gravDir);
         if (ceil2)
         {
             p->vy = 0.0f;
@@ -1131,7 +1432,7 @@ void Player_Update(Player *p, float dt)
     if (p->parentIdx < 0)
     {
         int ceil3 = 0;
-        proposed = HandleWindowCollisions(proposed, current, &ceil3);
+        proposed = HandleWindowCollisions(proposed, current, &ceil3, gravDir);
         if (ceil3)
         {
             p->vy = 0.0f;
@@ -1140,7 +1441,7 @@ void Player_Update(Player *p, float dt)
     }
 
     int ceil4 = 0;
-    proposed = HandleButtonCollisions(proposed, current, &ceil4);
+    proposed = HandleButtonCollisions(proposed, current, &ceil4, gravDir);
     if (ceil4)
     {
         p->vy = 0.0f;
@@ -1165,7 +1466,7 @@ void Player_Update(Player *p, float dt)
        誤ってparentIdxを-1にクリアし、以後の全ての移動をフリーズさせて
        しまう。 */
     if (!p->grounded)
-        p->vy += GRAVITY * dt;
+        p->vy += GRAVITY * dt * gravDir;
     else
         p->vy = 0.0f;
 

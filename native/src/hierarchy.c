@@ -99,6 +99,10 @@ void Hierarchy_RecordOriginalSizes(int rootIndex)
         GetWindowRect(child->hwnd, &r);
         child->origSize.cx = r.right - r.left;
         child->origSize.cy = r.bottom - r.top;
+        /* Hierarchy_ApplyRelativeTransform専用: サイズだけでなく、この時点の
+           絶対位置も記録しておく。相対オフセット = このrectとrootIndex側の
+           開始時点rectとの差分。 */
+        child->origBoundsAtResizeStart = r;
         child->origSizeGen = g_resizeGeneration;
         Hierarchy_RecordOriginalSizes(root->childIdx[i]);
     }
@@ -182,19 +186,17 @@ static void ApplyScaleToButtonsIfParented(int rootIndex, float scaleX, float sca
     }
 }
 
-void Hierarchy_ApplyScale(int rootIndex, float scaleX, float scaleY)
+/* オリジナル実装ではPlayerとGoalは実際のIEffectTarget子要素であり
+   （通常のネストされたウィンドウと同様にGameWindow.AddChildで追加される）、
+   BaseWindowEffect.Applyの再帰的な走査はどの深さに親を持っていても
+   それらに到達する -- ユーザーがドラッグしているウィンドウの直下に
+   いる場合だけではない。すべての再帰レベルでチェックする（最上位だけ
+   ではなく）ことで、孫の中にネストされたプレイヤーやゴールも正しく
+   伝播したスケールを受け取れる。Hierarchy_ApplyScaleとHierarchy_ApplyRelative
+   Transformの両方から共有される（Player/Goal/ボタンはどちらの経路でも
+   「サイズのみ変更、位置固定」のまま扱う）。 */
+static void ApplyScaleToSpecialChildren(int rootIndex, float scaleX, float scaleY)
 {
-    GameWindowData *root = GetWindowData(rootIndex);
-    if (!root)
-        return;
-
-    /* オリジナル実装ではPlayerとGoalは実際のIEffectTarget子要素であり
-       （通常のネストされたウィンドウと同様にGameWindow.AddChildで追加される）、
-       BaseWindowEffect.Applyの再帰的な走査はどの深さに親を持っていても
-       それらに到達する -- ユーザーがドラッグしているウィンドウの直下に
-       いる場合だけではない。すべての再帰レベルでチェックする（最上位だけ
-       ではなく）ことで、孫の中にネストされたプレイヤーやゴールも正しく
-       伝播したスケールを受け取れる。 */
     Player *p = Player_GetActive();
     if (p && p->parentIdx == rootIndex)
     {
@@ -203,6 +205,15 @@ void Hierarchy_ApplyScale(int rootIndex, float scaleX, float scaleY)
     }
     ApplyScaleToGoalIfParented(rootIndex, scaleX, scaleY);
     ApplyScaleToButtonsIfParented(rootIndex, scaleX, scaleY);
+}
+
+void Hierarchy_ApplyScale(int rootIndex, float scaleX, float scaleY)
+{
+    GameWindowData *root = GetWindowData(rootIndex);
+    if (!root)
+        return;
+
+    ApplyScaleToSpecialChildren(rootIndex, scaleX, scaleY);
 
     for (int i = 0; i < root->childCount; i++)
     {
@@ -253,6 +264,136 @@ void Hierarchy_ApplyScale(int rootIndex, float scaleX, float scaleY)
         float actualScaleY = (float)newH / (float)child->origSize.cy;
 
         Hierarchy_ApplyScale(root->childIdx[i], actualScaleX, actualScaleY);
+    }
+}
+
+void Hierarchy_ApplyRelativeTransform(int rootIndex, RECT oldRect, RECT newRect)
+{
+    GameWindowData *root = GetWindowData(rootIndex);
+    if (!root)
+        return;
+
+    int oldW = oldRect.right - oldRect.left;
+    int oldH = oldRect.bottom - oldRect.top;
+    if (oldW <= 0 || oldH <= 0)
+        return;
+
+    float scaleX = (float)(newRect.right - newRect.left) / (float)oldW;
+    float scaleY = (float)(newRect.bottom - newRect.top) / (float)oldH;
+
+    /* Player/Goal/ボタンは従来通り「サイズのみ変更、位置固定」のまま
+       （Hierarchy_ApplyScaleと共有）。 */
+    ApplyScaleToSpecialChildren(rootIndex, scaleX, scaleY);
+
+    for (int i = 0; i < root->childCount; i++)
+    {
+        GameWindowData *child = GetWindowData(root->childIdx[i]);
+        if (!child || !child->hwnd)
+            continue;
+        if (child->kind == WT_GOAL || IsButtonWindowKind(child->kind))
+            continue;
+
+        /* ジェスチャー開始時点の記録が無い（Hierarchy_RecordOriginalSizes後に
+           途中で子になった）場合は、現在のrectをこの場でベースラインとして
+           確立する -- Hierarchy_ApplyScaleの同種のセーフティネットと同じ考え方。 */
+        if (child->origSizeGen != g_resizeGeneration)
+        {
+            RECT cr;
+            GetWindowRect(child->hwnd, &cr);
+            child->origSize.cx = cr.right - cr.left;
+            child->origSize.cy = cr.bottom - cr.top;
+            child->origBoundsAtResizeStart = cr;
+            child->origSizeGen = g_resizeGeneration;
+        }
+
+        RECT childOldRect = child->origBoundsAtResizeStart;
+
+        int newW = RoundToNearest((float)child->origSize.cx * scaleX);
+        int newH = RoundToNearest((float)child->origSize.cy * scaleY);
+        /* Hierarchy_ApplyScale(通常のResizable用)と異なりMIN_WINDOW_SIZE(100)
+           では下限を課さない -- 制限なしリサイズの子孫は、親自身と同じ
+           UNCONSTRAINED_MIN_ABS_SIZE(20)までの縮小を許容する。 */
+        if (newW < UNCONSTRAINED_MIN_ABS_SIZE)
+            newW = UNCONSTRAINED_MIN_ABS_SIZE;
+        if (newW > MAX_WINDOW_SIZE)
+            newW = MAX_WINDOW_SIZE;
+        if (newH < UNCONSTRAINED_MIN_ABS_SIZE)
+            newH = UNCONSTRAINED_MIN_ABS_SIZE;
+        if (newH > MAX_WINDOW_SIZE)
+            newH = MAX_WINDOW_SIZE;
+
+        /* 親(root)に対する相対オフセットも同じスケールで追従させる -- これに
+           より、アンカー基準の反転で親の可視矩形の左上そのものが動いても、
+           子は親の中の同じ相対位置・相対サイズを保つ（絶対位置を固定する
+           Hierarchy_ApplyScaleとの違い）。 */
+        int newX = newRect.left + RoundToNearest((float)(childOldRect.left - oldRect.left) * scaleX);
+        int newY = newRect.top + RoundToNearest((float)(childOldRect.top - oldRect.top) * scaleY);
+
+        SetWindowPos(child->hwnd, NULL, newX, newY, newW, newH, SWP_NOZORDER | SWP_NOACTIVATE);
+        InvalidateRect(child->hwnd, NULL, FALSE);
+        UpdateWindow(child->hwnd);
+
+        RECT childNewRect = {newX, newY, newX + newW, newY + newH};
+        Hierarchy_ApplyRelativeTransform(root->childIdx[i], childOldRect, childNewRect);
+    }
+}
+
+void Hierarchy_ToggleInheritedFlip(int rootIndex, int toggleX, int toggleY)
+{
+    GameWindowData *root = GetWindowData(rootIndex);
+    if (!root)
+        return;
+
+    /* ApplyScaleToSpecialChildrenと同じパターン: プレイヤー・Goal・ボタンは
+       childIdx[]には入らずparentIdxで追跡されるため、再帰の各段でこの段の
+       rootIndexに乗っているかを個別にチェックする必要がある。 */
+    Player *p = Player_GetActive();
+    if (p && p->parentIdx == rootIndex)
+    {
+        if (toggleX)
+            p->inheritedFlipX ^= 1;
+        if (toggleY)
+            p->inheritedFlipY ^= 1;
+    }
+
+    int goalIdx = FindGoalIndex();
+    if (goalIdx >= 0 && g_windows[goalIdx].parentIdx == rootIndex)
+    {
+        GameWindowData *goal = &g_windows[goalIdx];
+        if (toggleX)
+            goal->inheritedFlipX ^= 1;
+        if (toggleY)
+            goal->inheritedFlipY ^= 1;
+        if (goal->hwnd)
+            InvalidateRect(goal->hwnd, NULL, FALSE);
+    }
+
+    for (int i = 0; i < g_windowCount; i++)
+    {
+        GameWindowData *btn = &g_windows[i];
+        if (!IsButtonWindowKind(btn->kind) || btn->parentIdx != rootIndex)
+            continue;
+        if (toggleX)
+            btn->inheritedFlipX ^= 1;
+        if (toggleY)
+            btn->inheritedFlipY ^= 1;
+        if (btn->hwnd)
+            InvalidateRect(btn->hwnd, NULL, FALSE);
+    }
+
+    for (int i = 0; i < root->childCount; i++)
+    {
+        GameWindowData *child = GetWindowData(root->childIdx[i]);
+        if (!child)
+            continue;
+        if (toggleX)
+            child->inheritedFlipX ^= 1;
+        if (toggleY)
+            child->inheritedFlipY ^= 1;
+        if (child->hwnd)
+            InvalidateRect(child->hwnd, NULL, FALSE);
+
+        Hierarchy_ToggleInheritedFlip(root->childIdx[i], toggleX, toggleY);
     }
 }
 

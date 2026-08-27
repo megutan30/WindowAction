@@ -7,6 +7,7 @@
 #include "strategy.h"
 #include "stage.h"
 #include "gamefont.h"
+#include "editor.h"
 
 static Player g_player;
 
@@ -47,10 +48,26 @@ static void HandleStageRequests(HINSTANCE hInstance)
         g_requestNext = 0;
         LoadStage(hInstance, Stage_Current() + 1);
     }
+#ifdef ENABLE_STAGE_EDITOR
+    else if (g_requestTest)
+    {
+        g_requestTest = 0;
+        /* Editor_LoadTestStage自身がPlayer_GetActive()経由でg_playerの
+           リセット/初期親割り当てまで行う（LoadStageがStage_Load後に
+           行う処理と同じ役割）。 */
+        Editor_LoadTestStage(hInstance);
+    }
+#endif
 }
 
 static void CheckGoal(HINSTANCE hInstance)
 {
+#ifdef ENABLE_STAGE_EDITOR
+    /* テストステージは通常のステージ進行(Stage_Current()±1)の範囲外にある
+       ため、ゴール接触による自動遷移は行わない。 */
+    if (Editor_IsTestStage())
+        return;
+#endif
     if (!Stage_HasGoal())
         return;
 
@@ -93,11 +110,19 @@ static void InvalidateLiveWindows(void)
        ホバーハイライトのために現在のカーソル位置を追跡し、また親リンクが
        変化した際にはウィンドウ自身が動いていなくても親色のアウトラインを
        更新する必要がある -- これらはすべて次のWM_PAINTでしか反映されないため、
-       毎フレーム強制的に発生させる。 */
+       毎フレーム強制的に発生させる。
+
+       ボタン種別（Start/Exit/Retry/ToTitle等）も除外していなかった -- ただし
+       PaintGameWindowはボタンにもIsWindowHovered基準のホバーハイライト色分岐
+       (RGB(230,230,230)/RGB(200,200,200))を実装済みなので、ボタンを除外すると
+       この色分岐が初回描画のまま固定され、カーソルを乗せても一切反映されない
+       （実際に発生した不具合）。IsQueryableWindowによるボタン/Goal除外はやめ、
+       生存している全ウィンドウを対象にする。 */
     for (int i = 0; i < g_windowCount; i++)
     {
-        if (IsQueryableWindow(g_windows[i].kind) && g_windows[i].hwnd)
-            InvalidateRect(g_windows[i].hwnd, NULL, FALSE);
+        if (!g_windows[i].hwnd || g_windows[i].minimized)
+            continue;
+        InvalidateRect(g_windows[i].hwnd, NULL, FALSE);
     }
 }
 
@@ -155,6 +180,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         HandleDeletableInput();
         NoEntry_UpdateAnimation((float)dt);
         MinimizeAnim_UpdateAll((float)dt);
+#ifdef ENABLE_STAGE_EDITOR
+        Editor_UpdatePaletteDrags();
+#endif
         InvalidateLiveWindows();
         ZOrder_ReassertOverlayFront(g_player.hwnd);
 

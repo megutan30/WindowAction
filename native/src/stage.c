@@ -56,6 +56,9 @@ void Stage_Load(HINSTANCE h, int index)
         g_playerStartY = 813;
         MakeButton(h, WT_BTN_START, 850, 500, "Start");
         MakeButton(h, WT_BTN_EXIT, 850, 625, "Exit");
+#ifdef ENABLE_STAGE_EDITOR
+        MakeButton(h, WT_BTN_TEST, 850, 750, "Test");
+#endif
         g_isTitleStage = 1;
         break;
 

@@ -72,13 +72,28 @@ void WindowQuery_GetClientBounds(int index, RECT *out)
        持つため、GetClientRectはその帯を含んだ全クライアント領域を返す。
        「移動可能領域」としてはこの帯を歩行可能な内部空間に含めてはいけない
        （WS_CAPTION時代はOSが非クライアント領域として自動的に除外していた）
-       ので、Goal/ボタン以外の種別ではここで明示的に上端をタイトルバー分
-       押し下げる。 */
+       ので、Goal/ボタン以外の種別ではここで明示的にタイトルバー分を除外する。
+       このウィンドウが現在上下反転して見えている(GameWindow_GetEffectiveFlip)
+       場合、タイトルバーもDrawTitleBarごとStretchBltでミラー描画され見た目上は
+       下端に表示されるため、除外する帯も下端に切り替える -- そうしないと、
+       見た目には存在しない上端の帯がプレイヤーの移動可能領域を塞いだまま
+       残ってしまう（実際の不具合として報告された）。 */
     if (d->kind != WT_GOAL && !IsButtonWindowKind(d->kind))
     {
-        out->top += TITLE_BAR_HEIGHT;
-        if (out->top > out->bottom)
-            out->top = out->bottom;
+        int flipX, flipY;
+        GameWindow_GetEffectiveFlip(d, &flipX, &flipY);
+        if (flipY)
+        {
+            out->bottom -= TITLE_BAR_HEIGHT;
+            if (out->bottom < out->top)
+                out->bottom = out->top;
+        }
+        else
+        {
+            out->top += TITLE_BAR_HEIGHT;
+            if (out->top > out->bottom)
+                out->top = out->bottom;
+        }
     }
 }
 
