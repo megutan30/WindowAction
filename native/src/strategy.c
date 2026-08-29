@@ -430,9 +430,19 @@ static void UpdateUnconstrained(int index, GameWindowData *data)
 
         /* 反転イベントが起きた軸だけ、その時点の全子孫のinheritedFlipX/Yを
            永続的にXORで反転させる。親から切り離された後もこの見た目は
-           元に戻らず、再度いずれかの祖先が反転した時だけ変化する。 */
+           元に戻らず、再度いずれかの祖先が反転した時だけ変化する。
+           同時に、直接の子（ウィンドウ・プレイヤー）の位置も該当軸について
+           鏡映する -- 直前のHierarchy_ApplyRelativeTransformは正のスケール比
+           だけで追従させるため反転を正しく表現できず、そのままだと反転で
+           見た目上反対側に移動したタイトルバー等にプレイヤーがめり込んで
+           しまう（実際に報告された不具合）。 */
         if (flipX != wasFlippedX || flipY != wasFlippedY)
-            Hierarchy_ToggleInheritedFlip(index, flipX != wasFlippedX, flipY != wasFlippedY);
+        {
+            int mirrorX = flipX != wasFlippedX;
+            int mirrorY = flipY != wasFlippedY;
+            Hierarchy_ToggleInheritedFlip(index, mirrorX, mirrorY);
+            Hierarchy_MirrorDirectChildren(index, rootNewRect, mirrorX, mirrorY);
+        }
 
         data->logicalW = flipX ? -validated.cx : validated.cx;
         data->logicalH = flipY ? -validated.cy : validated.cy;

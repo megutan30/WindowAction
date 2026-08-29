@@ -280,9 +280,13 @@ void Hierarchy_ToggleInheritedFlip(int rootIndex, int toggleX, int toggleY)
     if (!root)
         return;
 
-    /* ApplyScaleToSpecialChildrenと同じパターン: プレイヤー・Goal・ボタンは
-       childIdx[]には入らずparentIdxで追跡されるため、再帰の各段でこの段の
-       rootIndexに乗っているかを個別にチェックする必要がある。 */
+    /* プレイヤーだけはchildIdx[]には入らずparentIdxのみで追跡されるため
+       （Hierarchy_Attachが一切呼ばれない）、再帰の各段でこの段のrootIndexに
+       乗っているかを個別にチェックする必要がある。Goal/ボタンはGoal_UpdateParent/
+       Button_UpdateParentがHierarchy_Attach経由でchildIdx[]にも登録するため、
+       下のchildIdx[]ループ（種別によるスキップが無い）で自然に処理される --
+       ここで別途XORすると二重反転で相殺されてしまう（実際に発生していた
+       不具合）。 */
     Player *p = Player_GetActive();
     if (p && p->parentIdx == rootIndex)
     {
@@ -290,31 +294,6 @@ void Hierarchy_ToggleInheritedFlip(int rootIndex, int toggleX, int toggleY)
             p->inheritedFlipX ^= 1;
         if (toggleY)
             p->inheritedFlipY ^= 1;
-    }
-
-    int goalIdx = FindGoalIndex();
-    if (goalIdx >= 0 && g_windows[goalIdx].parentIdx == rootIndex)
-    {
-        GameWindowData *goal = &g_windows[goalIdx];
-        if (toggleX)
-            goal->inheritedFlipX ^= 1;
-        if (toggleY)
-            goal->inheritedFlipY ^= 1;
-        if (goal->hwnd)
-            InvalidateRect(goal->hwnd, NULL, FALSE);
-    }
-
-    for (int i = 0; i < g_windowCount; i++)
-    {
-        GameWindowData *btn = &g_windows[i];
-        if (!IsButtonWindowKind(btn->kind) || btn->parentIdx != rootIndex)
-            continue;
-        if (toggleX)
-            btn->inheritedFlipX ^= 1;
-        if (toggleY)
-            btn->inheritedFlipY ^= 1;
-        if (btn->hwnd)
-            InvalidateRect(btn->hwnd, NULL, FALSE);
     }
 
     for (int i = 0; i < root->childCount; i++)
@@ -330,6 +309,63 @@ void Hierarchy_ToggleInheritedFlip(int rootIndex, int toggleX, int toggleY)
             InvalidateRect(child->hwnd, NULL, FALSE);
 
         Hierarchy_ToggleInheritedFlip(root->childIdx[i], toggleX, toggleY);
+    }
+}
+
+/* `rootIndex`が今まさに反転イベントを起こした瞬間に、Hierarchy_ToggleInheritedFlip
+   と一緒に一度だけ呼ぶ。Hierarchy_ApplyRelativeTransform/Player_
+   ApplyParentRelativeTransformは常に正のスケール比（大きさの比率）だけで
+   子の位置を追従させるため、反転（親の可視矩形の左上そのものが動く/
+   入れ替わる）は正しく表現できない -- 反転前に親矩形の下寄りにいた子は、
+   その「開始位置からの下寄り具合」がそのまま新しい矩形にも適用され、結果的に
+   新しい矩形でも下寄りの位置、つまり反転で見た目上下端に移動したタイトル
+   バー側に来てしまう（実際に報告された不具合: プレイヤーのめり込みと、
+   そこが天井扱いになり常に「落下中」から抜け出せなくなる）。
+   `rootBounds`（反転を反映済みの現在の親矩形）を軸に、直接の子（ウィンドウ
+   ・プレイヤー）の位置をmirrorX/mirrorYで指定された軸について正しく鏡映
+   する。孫以下は対象の子自身が反転したわけではないので鏡映せず、子が
+   動いた分だけHierarchy_PropagateMoveで平行移動させ、内部の相対配置を
+   保つ。Goal/ボタンは常に位置固定という既存の設計を崩さないよう対象外。 */
+void Hierarchy_MirrorDirectChildren(int rootIndex, RECT rootBounds, int mirrorX, int mirrorY)
+{
+    if (!mirrorX && !mirrorY)
+        return;
+    GameWindowData *root = GetWindowData(rootIndex);
+    if (!root)
+        return;
+
+    Player *p = Player_GetActive();
+    if (p && p->parentIdx == rootIndex)
+        Player_MirrorWithinParent(p, rootIndex, rootBounds, mirrorX, mirrorY);
+
+    for (int i = 0; i < root->childCount; i++)
+    {
+        GameWindowData *child = GetWindowData(root->childIdx[i]);
+        if (!child || !child->hwnd)
+            continue;
+        if (child->kind == WT_GOAL || IsButtonWindowKind(child->kind))
+            continue;
+
+        RECT cb;
+        GetWindowRect(child->hwnd, &cb);
+        int newLeft = cb.left;
+        int newTop = cb.top;
+        if (mirrorX)
+            newLeft = rootBounds.left + rootBounds.right - cb.right;
+        if (mirrorY)
+            newTop = rootBounds.top + rootBounds.bottom - cb.bottom;
+
+        int dx = newLeft - cb.left;
+        int dy = newTop - cb.top;
+        if (dx == 0 && dy == 0)
+            continue;
+
+        SetWindowPos(child->hwnd, NULL, newLeft, newTop, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        InvalidateRect(child->hwnd, NULL, FALSE);
+        /* 子自身は鏡映で移動したが、その内部の孫たちは子から見て相対的には
+           何も変わっていない -- 子が動いた分だけ平行移動させれば、孫の
+           子に対する相対配置は保たれる（孫自身を鏡映する必要はない）。 */
+        Hierarchy_PropagateMove(root->childIdx[i], dx, dy);
     }
 }
 
@@ -480,36 +516,15 @@ void Hierarchy_MinimizeSubtree(int index)
 
     /* オリジナル実装ではPlayerFormも単なる別のIEffectTarget子要素であるため、
        このサブツリー内の他のGameWindow/Goalと同様に直接OnMinimize()呼び出しを
-       受け取る -- 物理演算の更新を凍結し、このウィンドウから切り離す。 */
+       受け取る -- 物理演算の更新を凍結し、このウィンドウから切り離す。
+       Goal/ボタンはGoal_UpdateParent/Button_UpdateParentがHierarchy_Attach
+       経由でchildIdx[]にも登録するため、上のchildIdx[]再帰ループ（種別による
+       スキップが無い）で通常の子と同じく非表示化・切り離しが行われる --
+       ここで別途処理する必要はない（プレイヤーだけはHierarchy_Attachが一切
+       呼ばれずparentIdxのみで追跡されるため、この個別チェックが必要）。 */
     Player *p = Player_GetActive();
     if (p && p->parentIdx == index)
         Player_OnMinimize(p);
-
-    /* Goal/ボタンはPlayerと同じくchildIdx[]には入らずparentIdxのみで
-       追跡される（Hierarchy_ToggleInheritedFlip/ApplyScaleToSpecialChildren
-       参照）。ここで明示的に扱わないと、親ウィンドウが最小化で消えても
-       Goal/ボタンだけが取り残されて表示され続けてしまう（実際に報告された
-       不具合）。通常の子と同じく非表示にし、親から切り離す。 */
-    int goalIdx = FindGoalIndex();
-    if (goalIdx >= 0)
-    {
-        GameWindowData *goal = &g_windows[goalIdx];
-        if (goal->hwnd && !goal->minimized && goal->parentIdx == index)
-        {
-            goal->minimized = 1;
-            goal->parentIdx = -1;
-            ShowWindow(goal->hwnd, SW_MINIMIZE);
-        }
-    }
-    for (int i = 0; i < g_windowCount; i++)
-    {
-        GameWindowData *btn = &g_windows[i];
-        if (!IsButtonWindowKind(btn->kind) || !btn->hwnd || btn->minimized || btn->parentIdx != index)
-            continue;
-        btn->minimized = 1;
-        btn->parentIdx = -1;
-        ShowWindow(btn->hwnd, SW_MINIMIZE);
-    }
 }
 
 void Hierarchy_RestoreWindow(int index)

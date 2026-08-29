@@ -39,6 +39,16 @@ void Hierarchy_ApplyRelativeTransform(int rootIndex, RECT oldRect, RECT newRect,
    （UpdateUnconstrainedがこのフレームでの新旧反転状態を比較して呼び出す）。 */
 void Hierarchy_ToggleInheritedFlip(int rootIndex, int toggleX, int toggleY);
 
+/* `rootIndex`が今まさに反転イベントを起こした瞬間に、Hierarchy_ToggleInheritedFlip
+   と一緒に一度だけ呼ぶ。Hierarchy_ApplyRelativeTransformの正スケール比だけの
+   追従では反転（親矩形の左上そのものが動く/入れ替わる）を正しく表現できず、
+   直接の子（ウィンドウ・プレイヤー）が見た目上反対側に移動したタイトルバー
+   等にめり込む不具合があった。`rootBounds`（反転を反映済みの現在の親矩形）
+   を軸に、直接の子の位置をmirrorX/mirrorYで指定された軸について鏡映する。
+   孫以下は子が動いた分だけ平行移動（Hierarchy_PropagateMove）させ、内部の
+   相対配置を保つ。Goal/ボタンは常に位置固定という既存の設計により対象外。 */
+void Hierarchy_MirrorDirectChildren(int rootIndex, RECT rootBounds, int mirrorX, int mirrorY);
+
 int Hierarchy_IsDescendantOf(int candidateIndex, int ancestorIndex);
 
 /* `startIdx`から始まる祖先チェーン上のどこかに`targetIdx`が存在すればtrue

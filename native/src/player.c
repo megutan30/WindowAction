@@ -504,6 +504,43 @@ void Player_ApplyParentRelativeTransform(Player *p, int windowIndex, RECT oldRec
     }
 }
 
+/* 制限なしリサイズウィンドウが反転した瞬間に一度だけ呼ぶ。Player_
+   ApplyParentRelativeTransformは常に正のスケール比（大きさの比率）だけで
+   位置を追従させるため、反転（親の可視矩形の左上そのものが動く/入れ替わる）
+   は正しく表現できない -- 反転前に床の上（親矩形の下寄り）にいたプレイヤーは、
+   その「開始位置からの下寄り具合」をそのまま新しい矩形にも適用され、結果的に
+   新しい矩形でも下寄りの位置、つまり反転で見た目上下端に移動したタイトルバー
+   の位置に来てしまう（実際に報告された不具合: タイトルバーへのめり込み、
+   かつそこが天井扱いになり常に「落下中」から抜け出せなくなる）。
+   ここでは`parentBounds`（反転を反映済みの現在の親矩形）を軸に、プレイヤーの
+   位置を該当する軸について正しく鏡映する。 */
+void Player_MirrorWithinParent(Player *p, int windowIndex, RECT parentBounds, int mirrorX, int mirrorY)
+{
+    if (p->parentIdx != windowIndex || (!mirrorX && !mirrorY))
+        return;
+
+    RECT pb;
+    Player_GetBounds(p, &pb);
+    if (mirrorX)
+        p->x = (float)(parentBounds.left + parentBounds.right - pb.right);
+    if (mirrorY)
+        p->y = (float)(parentBounds.top + parentBounds.bottom - pb.bottom);
+
+    /* 次フレームのPlayer_ApplyParentRelativeTransformが、この鏡映による
+       ジャンプを「歩行による移動」と誤認して差分適用してしまわないよう、
+       追従の基準もこの時点の親矩形に更新しておく。 */
+    p->lastAppliedParentRect = parentBounds;
+
+    if (p->hwnd)
+    {
+        int dx, dy, dw, dh;
+        GetPlayerDisplayRect(p, &dx, &dy, &dw, &dh);
+        SetWindowPos(p->hwnd, NULL, dx, dy, dw, dh, SWP_NOZORDER | SWP_NOACTIVATE);
+        InvalidateRect(p->hwnd, NULL, FALSE);
+        UpdateWindow(p->hwnd);
+    }
+}
+
 /* ---- CheckHorizontalCollision / CheckVerticalCollision: NoEntryのみ ---- */
 
 static int SignOf(float v) { return v > 0 ? 1 : (v < 0 ? -1 : 0); }

@@ -62,6 +62,14 @@ void Player_AssignInitialParent(Player *p);
    ウィンドウの新しい境界内に収まるよう位置を再クランプする。 */
 void Player_ApplyParentRelativeTransform(Player *p, int windowIndex, RECT oldRect, RECT newRect);
 
+/* 制限なしリサイズウィンドウが反転した瞬間に一度だけ呼ぶ。Player_
+   ApplyParentRelativeTransformの正スケール比だけの追従では反転（親矩形の
+   左上そのものが動く/入れ替わる）を正しく表現できず、プレイヤーが見た目上
+   移動したタイトルバー側にめり込む不具合があった。`parentBounds`（反転を
+   反映済みの現在の親矩形）を軸に、mirrorX/mirrorYで指定された軸について
+   プレイヤーの位置を正しく鏡映する。 */
+void Player_MirrorWithinParent(Player *p, int windowIndex, RECT parentBounds, int mirrorX, int mirrorY);
+
 /* プレイヤーをフリーズさせ（Player_Update が何もしなくなる）、現在の親から
    切り離し、後の Player_OnRestore のために記憶しておく。プレイヤーが乗っている
    ウィンドウが最小化されたときに呼ばれる PlayerForm.OnMinimize を反映。 */
