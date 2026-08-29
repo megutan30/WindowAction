@@ -182,6 +182,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         MinimizeAnim_UpdateAll((float)dt);
 #ifdef ENABLE_STAGE_EDITOR
         Editor_UpdatePaletteDrags();
+        Editor_HandleDeleteInput();
 #endif
         InvalidateLiveWindows();
         ZOrder_ReassertOverlayFront(g_player.hwnd);

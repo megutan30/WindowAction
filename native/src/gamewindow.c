@@ -833,9 +833,15 @@ int CreateGameWindowIndexed(HINSTANCE hInstance, WindowKind kind, int x, int y, 
         /* GameButton.InitializeButtonはFormBorderStyle.Noneを設定する -- ゴールと
            同様に枠なし。ここでWS_BORDERを付けると、オリジナルには枠が無いのに
            GetWindowFullBoundsのクライアント/外枠の分離がボタンにも適用されて
-           しまう。 */
+           しまう。
+           WS_EX_TOOLWINDOW: 所有者を持たないトップレベルウィンドウはデフォルトで
+           タスクバーボタンを持ってしまう。ステージエディターのパレットアイコン
+           (WT_BTN_PALETTE、種別数分)やツールバーボタンは数が多く、これらすべてが
+           タスクバーに並ぶと非常に見づらい（実際に報告された不具合）。ボタンは
+           元々OS標準の見た目・タスクバー統合を必要としないゲーム内UI要素なので、
+           ここで一律にタスクバーから除外する。 */
         style = WS_POPUP | WS_VISIBLE;
-        exStyle = WS_EX_TOPMOST;
+        exStyle = WS_EX_TOPMOST | WS_EX_TOOLWINDOW;
 #ifdef ENABLE_STAGE_EDITOR
         /* パレットアイコンだけはWS_EX_LAYEREDも付けておく -- ドラッグ中に
            SetLayeredWindowAttributes(..., LWA_ALPHA)で半透明化するため。

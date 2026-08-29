@@ -41,6 +41,12 @@ void Editor_EndPaletteDrag(int index);
    （カレントディレクトリ）へ書き出す。 */
 void Editor_ExportStage(void);
 
+/* テストステージ中のみ有効: Deleteキーが押された瞬間（押しっぱなしでの
+   連続削除を避けるためエッジ検出）、その時点のマウスカーソル直下にある
+   配置済みウィンドウ（パレットアイコン/ツールバーボタン自身を除く、
+   種別を問わない）を1つ削除する。毎フレーム1回呼び出すこと。 */
+void Editor_HandleDeleteInput(void);
+
 #endif /* ENABLE_STAGE_EDITOR */
 
 #endif

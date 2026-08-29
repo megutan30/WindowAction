@@ -183,7 +183,14 @@ void Editor_EndPaletteDrag(int index)
     {
         WindowKind kind = d->paletteKind;
         int size = DragFullSize(kind);
-        CreateGameWindow(g_hInstance, kind, cur.x - size / 2, cur.y - size / 2, size, size, NULL);
+        int newIdx = CreateGameWindowIndexed(g_hInstance, kind, cur.x - size / 2, cur.y - size / 2, size, size, NULL);
+        /* WindowMessageHandler.HandleLeftButtonUpと同じく、配置直後に一度だけ
+           親子判定を行う -- そうしないとドラッグ&ドロップで置いたウィンドウは
+           他のウィンドウの中に完全に収まっていても親子付けされず、その場で
+           少し動かす（ナッジドラッグ）まで親子関係が確立しなかった
+           （実際に報告された不具合）。 */
+        if (newIdx >= 0 && IsQueryableWindow(kind))
+            Hierarchy_CheckAndUpdate(newIdx);
     }
 
     /* アイコン自身は常に元のサイズ・不透明度・ホームポジションへ戻す
@@ -218,8 +225,9 @@ static const char *WindowKindName(WindowKind kind)
     }
 }
 
-/* Editor_ExportStage専用: エディターのUI要素自身(パレット/ツールバー)は
-   書き出し対象から除外する。 */
+/* エディターのUI要素自身(パレット/ツールバー)を対象から除外するための判定。
+   Editor_ExportStage（書き出し対象から除外）とEditor_HandleDeleteInput
+   （Deleteキーでの削除対象から除外）の両方で使う。 */
 static int IsEditorChromeKind(WindowKind kind)
 {
     return kind == WT_BTN_PALETTE || kind == WT_BTN_TEST ||
@@ -255,6 +263,30 @@ void Editor_ExportStage(void)
     }
 
     fclose(f);
+}
+
+void Editor_HandleDeleteInput(void)
+{
+    if (!g_isTestStage)
+        return;
+
+    /* 押しっぱなしでカーソル直下のウィンドウを連続的に消し続けてしまわない
+       よう、キーが実際に「今フレーム押された」エッジでのみ発火させる。 */
+    static int wasDown = 0;
+    int isDown = (GetAsyncKeyState(VK_DELETE) & 0x8000) != 0;
+    if (isDown && !wasDown)
+    {
+        POINT cur;
+        GetCursorPos(&cur);
+        HWND hit = WindowFromPoint(cur);
+        int index = FindWindowIndex(hit);
+        /* パレットアイコン/ツールバーボタン自身は削除対象から除外する --
+           これらはエディターのUIそのものであり「配置したウィンドウ」では
+           ない。それ以外は種別を問わず（Goalも含め）削除できる。 */
+        if (index >= 0 && !IsEditorChromeKind(g_windows[index].kind))
+            DeleteWindow(index);
+    }
+    wasDown = isDown;
 }
 
 #endif /* ENABLE_STAGE_EDITOR */
