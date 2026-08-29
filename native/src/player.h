@@ -7,16 +7,17 @@
 typedef struct {
     float x, y;   /* 左上座標、スクリーン座標系（滑らかな物理演算のためfloat） */
     int width, height; /* 現在のサイズ -- 可変: リサイズされる親に合わせてスケーリングされる */
-    SIZE origSize; /* スケール基準サイズ -- origSizeGen を参照 */
-    int origSizeGen; /* origSize/origBoundsAtResizeStart が最後に確定した時点の g_resizeGeneration の値 */
-    RECT origBoundsAtResizeStart; /* Player_ApplyParentRelativeTransform専用: ジェスチャー開始時点の絶対位置(サイズのスケール基準) */
+    int origSizeGen; /* lastAppliedParentRect が最後に確定した時点の g_resizeGeneration の値 */
     /* Player_ApplyParentRelativeTransform専用: 直近にこの関数を適用した時点の
-       親の可視矩形。位置の追従だけはorigBoundsAtResizeStart(ジェスチャー開始
-       時点)ではなくこちらをフレームごとの基準にする -- そうしないと、
-       リサイズ中にプレイヤー自身が歩いて動いた分が、次のフレームで
-       「ジェスチャー開始時点の位置からの再計算」により上書きされて戻されて
-       しまう（実際に報告された不具合）。フレームごとの差分だけを適用する
-       ことで、歩行による移動とリサイズによる追従を両立させる。 */
+       親の可視矩形。サイズ・位置ともに、ジェスチャー開始時点ではなくこちらを
+       フレームごとの基準にする -- そうしないと、(1)リサイズ中にプレイヤー
+       自身が歩いて動いた分が次のフレームで「ジェスチャー開始時点からの
+       再計算」により上書きされて戻されてしまう、(2)既にある程度リサイズが
+       進行した状態のウィンドウへ途中から入った場合、入った瞬間に「ジェス
+       チャー開始時点からずっとそこにいたかのような」倍率が一気に掛かって
+       サイズ・位置が瞬間的にジャンプしてしまう、という2つの不具合が起きる。
+       フレームごとの差分だけを積み重ねることで、歩行による移動と、いつ
+       入ってきても連続的なリサイズ追従を両立させる。 */
     RECT lastAppliedParentRect;
     float vy;
     int grounded;
@@ -52,15 +53,14 @@ Player *Player_GetActive(void);
    完全に含む、最も前面（最高Z-order）のウィンドウを選ぶ。 */
 void Player_AssignInitialParent(Player *p);
 
-/* プレイヤーの現在の親が `windowIndex` の場合、`oldRect`→`newRect`への変換
-   （ジェスチャー開始時点の親の可視矩形→現在フレームでの可視矩形、
-   GameWindowData.origBoundsAtResizeStartと同じ考え方）に合わせて、
-   origSize/origBoundsAtResizeStartを基準にサイズと相対位置の両方を追従
-   させる。通常の子ウィンドウ(Hierarchy_ApplyRelativeTransform)と同じ
-   「親に対する相対位置・相対サイズを保つ」挙動を、通常のResizableと
-   制限なしリサイズの両方の子であるプレイヤーにも適用する。最終的に
-   ウィンドウの新しい境界内に収まるよう位置を再クランプする。 */
-void Player_ApplyParentRelativeTransform(Player *p, int windowIndex, RECT oldRect, RECT newRect);
+/* プレイヤーの現在の親が `windowIndex` の場合、`newRect`（現在フレームでの
+   親の可視矩形）と直近にこの関数を適用した時点の矩形(lastAppliedParentRect)
+   との差分に合わせて、サイズと相対位置の両方を追従させる。通常の子
+   ウィンドウ(Hierarchy_ApplyRelativeTransform)と同じ「親に対する相対位置・
+   相対サイズを保つ」挙動を、通常のResizableと制限なしリサイズの両方の子
+   であるプレイヤーにも適用する。最終的にウィンドウの新しい境界内に収まる
+   よう位置を再クランプする。 */
+void Player_ApplyParentRelativeTransform(Player *p, int windowIndex, RECT newRect);
 
 /* 制限なしリサイズウィンドウが反転した瞬間に一度だけ呼ぶ。Player_
    ApplyParentRelativeTransformの正スケール比だけの追従では反転（親矩形の

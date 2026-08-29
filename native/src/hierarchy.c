@@ -197,11 +197,11 @@ static void ApplyScaleToButtonsIfParented(int rootIndex, float scaleX, float sca
    親に対する相対位置・相対サイズを保つ（Player_ApplyParentRelativeTransform）
    一方、Goal/ボタンは元のC#実装と同じ「サイズのみ変更、位置固定」のまま
    扱う。 */
-static void ApplyScaleToSpecialChildren(int rootIndex, RECT oldRect, RECT newRect, float scaleX, float scaleY)
+static void ApplyScaleToSpecialChildren(int rootIndex, RECT newRect, float scaleX, float scaleY)
 {
     Player *p = Player_GetActive();
     if (p && p->parentIdx == rootIndex)
-        Player_ApplyParentRelativeTransform(p, rootIndex, oldRect, newRect);
+        Player_ApplyParentRelativeTransform(p, rootIndex, newRect);
     ApplyScaleToGoalIfParented(rootIndex, scaleX, scaleY);
     ApplyScaleToButtonsIfParented(rootIndex, scaleX, scaleY);
 }
@@ -220,7 +220,7 @@ void Hierarchy_ApplyRelativeTransform(int rootIndex, RECT oldRect, RECT newRect,
     float scaleX = (float)(newRect.right - newRect.left) / (float)oldW;
     float scaleY = (float)(newRect.bottom - newRect.top) / (float)oldH;
 
-    ApplyScaleToSpecialChildren(rootIndex, oldRect, newRect, scaleX, scaleY);
+    ApplyScaleToSpecialChildren(rootIndex, newRect, scaleX, scaleY);
 
     for (int i = 0; i < root->childCount; i++)
     {

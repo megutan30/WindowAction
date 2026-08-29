@@ -275,8 +275,6 @@ HWND CreatePlayerWindow(HINSTANCE hInstance, Player *p, int startX, int startY)
     p->y = (float)startY;
     p->width = PLAYER_SIZE;
     p->height = PLAYER_SIZE;
-    p->origSize.cx = PLAYER_SIZE;
-    p->origSize.cy = PLAYER_SIZE;
     p->origSizeGen = 0;
     p->vy = 0.0f;
     p->grounded = 0;
@@ -349,8 +347,6 @@ void Player_Reset(Player *p, int startX, int startY)
     p->y = (float)startY;
     p->width = PLAYER_SIZE;
     p->height = PLAYER_SIZE;
-    p->origSize.cx = PLAYER_SIZE;
-    p->origSize.cy = PLAYER_SIZE;
     p->origSizeGen = 0;
     p->vy = 0.0f;
     p->grounded = 0;
@@ -400,63 +396,60 @@ static int PlayerRoundToNearest(float v)
     return (v >= 0.0f) ? (int)(v + 0.5f) : (int)(v - 0.5f);
 }
 
-void Player_ApplyParentRelativeTransform(Player *p, int windowIndex, RECT oldRect, RECT newRect)
+void Player_ApplyParentRelativeTransform(Player *p, int windowIndex, RECT newRect)
 {
     if (p->parentIdx != windowIndex)
         return;
 
-    int oldW = oldRect.right - oldRect.left;
-    int oldH = oldRect.bottom - oldRect.top;
-    if (oldW <= 0 || oldH <= 0)
-        return;
-
-    /* このリサイズ世代でまだ一度もこの関数に触れられていない場合（ドラッグ
-       開始後に新たにこの親の内部に入ってきた等）は、現在の位置・サイズを
-       この場でベースラインとして確立する -- Hierarchy_ApplyRelativeTransform
-       の通常の子ウィンドウ用セーフティネットと同じ考え方。lastAppliedParentRect
-       も併せてoldRect（このジェスチャーの開始時点の親矩形）から始める。 */
+    /* このリサイズ世代でまだ一度もこの関数に触れられていない場合（ジェスチャー
+       開始時点から既にこの親の内部にいた、またはジェスチャーの途中で新たに
+       入ってきた）は、現在のサイズ・位置・親矩形をこの場でベースラインとして
+       確立するだけにとどめ、今フレームでのスケール適用は行わない。
+       もしここでジェスチャー開始時点の矩形(oldRect)を基準にスケールを
+       適用してしまうと、プレイヤーが既にある程度リサイズが進行した状態の
+       ウィンドウへ途中から入ってきた場合、「ジェスチャー開始時点からずっと
+       そこにいたかのような」倍率が入った瞬間に一気に掛かってしまい、
+       サイズ・位置が瞬間的に大きくジャンプしてしまう（実際に報告された
+       不具合: あらかじめリサイズしておいたウィンドウにプレイヤーが入ると
+       急激にサイズが変わる）。常に「前回この関数を適用した時点」からの
+       差分だけを積み重ねる方式に統一することで、いつ入ってきても連続的な
+       変化になる。 */
     if (p->origSizeGen != g_resizeGeneration)
     {
-        p->origSize.cx = p->width;
-        p->origSize.cy = p->height;
-        Player_GetBounds(p, &p->origBoundsAtResizeStart);
-        p->lastAppliedParentRect = oldRect;
         p->origSizeGen = g_resizeGeneration;
+        p->lastAppliedParentRect = newRect;
+        return;
     }
 
-    /* サイズは通常の子ウィンドウと同じく、ジェスチャー開始時点(oldRect)からの
-       累積スケールで求める -- サイズはプレイヤー自身の操作では変化しない
-       ため、毎フレーム再計算しても丸め誤差が蓄積する心配がない。 */
-    float cumulativeScaleX = (float)(newRect.right - newRect.left) / (float)oldW;
-    float cumulativeScaleY = (float)(newRect.bottom - newRect.top) / (float)oldH;
+    int lastW = p->lastAppliedParentRect.right - p->lastAppliedParentRect.left;
+    int lastH = p->lastAppliedParentRect.bottom - p->lastAppliedParentRect.top;
+    if (lastW <= 0 || lastH <= 0)
+    {
+        p->lastAppliedParentRect = newRect;
+        return;
+    }
 
-    int newW = (int)(p->origSize.cx * cumulativeScaleX);
-    int newH = (int)(p->origSize.cy * cumulativeScaleY);
+    /* サイズ・位置ともに、前回この関数を適用した時点の親矩形(lastAppliedParentRect)
+       からの差分だけを、プレイヤーの「現在の」サイズ・位置（Player_Updateに
+       よる歩行移動を既に反映済みかもしれない）に対して適用する。ジェスチャー
+       開始時点からの累積再計算にすると、リサイズ中にプレイヤーが歩いた分が
+       フレームごとに上書きされて元の相対位置へ戻されてしまう（別途報告
+       された不具合）。差分適用にすることで、歩行による移動とリサイズに
+       よる相対位置・相対サイズ追従を両立させる。 */
+    float stepScaleX = (float)(newRect.right - newRect.left) / (float)lastW;
+    float stepScaleY = (float)(newRect.bottom - newRect.top) / (float)lastH;
+
+    int newW = (int)((float)p->width * stepScaleX);
+    int newH = (int)((float)p->height * stepScaleY);
     if (newW < PLAYER_MIN_SIZE)
         newW = PLAYER_MIN_SIZE;
     if (newH < PLAYER_MIN_SIZE)
         newH = PLAYER_MIN_SIZE;
 
-    /* 位置はジェスチャー開始時点ではなく、前回この関数を適用した時点の親矩形
-       (lastAppliedParentRect)からの差分だけを、プレイヤーの「現在の」位置
-       （Player_Updateによる歩行移動を既に反映済みかもしれない）に対して
-       適用する。ジェスチャー開始時点からの累積再計算にすると、リサイズ中に
-       プレイヤーが歩いた分がフレームごとに上書きされて元の相対位置へ
-       戻されてしまう（実際に報告された不具合）。差分適用にすることで、
-       歩行による移動とリサイズによる相対位置追従を両立させる。 */
-    int lastW = p->lastAppliedParentRect.right - p->lastAppliedParentRect.left;
-    int lastH = p->lastAppliedParentRect.bottom - p->lastAppliedParentRect.top;
-    int newX = (int)p->x;
-    int newY = (int)p->y;
-    if (lastW > 0 && lastH > 0)
-    {
-        float stepScaleX = (float)(newRect.right - newRect.left) / (float)lastW;
-        float stepScaleY = (float)(newRect.bottom - newRect.top) / (float)lastH;
-        newX = newRect.left + PlayerRoundToNearest((float)((int)p->x - p->lastAppliedParentRect.left) * stepScaleX);
-        newY = newRect.top + PlayerRoundToNearest((float)((int)p->y - p->lastAppliedParentRect.top) * stepScaleY);
-    }
-    p->lastAppliedParentRect = newRect;
+    int newX = newRect.left + PlayerRoundToNearest((float)((int)p->x - p->lastAppliedParentRect.left) * stepScaleX);
+    int newY = newRect.top + PlayerRoundToNearest((float)((int)p->y - p->lastAppliedParentRect.top) * stepScaleY);
 
+    p->lastAppliedParentRect = newRect;
     p->width = newW;
     p->height = newH;
     p->x = (float)newX;
