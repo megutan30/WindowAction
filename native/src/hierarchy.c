@@ -265,7 +265,12 @@ void Hierarchy_ApplyRelativeTransform(int rootIndex, RECT oldRect, RECT newRect,
         int newX = newRect.left + RoundToNearest((float)(childOldRect.left - oldRect.left) * scaleX);
         int newY = newRect.top + RoundToNearest((float)(childOldRect.top - oldRect.top) * scaleY);
 
-        SetWindowPos(child->hwnd, NULL, newX, newY, newW, newH, SWP_NOZORDER | SWP_NOACTIVATE);
+        /* SWP_NOREDRAW: 位置とサイズが同時に変わる場合、これを付けないとOS側が
+           SetWindowPosの中で古い内容を新しい位置/サイズへ引き伸ばして即座に
+           描画してしまうことがあり、すぐ下の同期的なInvalidateRect+
+           UpdateWindowによる正しい描画で1フレームごとに上書きされる形になって
+           がくがくして見える（UpdateUnconstrainedの反転時と同じ原因）。 */
+        SetWindowPos(child->hwnd, NULL, newX, newY, newW, newH, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
         InvalidateRect(child->hwnd, NULL, FALSE);
         UpdateWindow(child->hwnd);
 

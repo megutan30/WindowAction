@@ -439,8 +439,14 @@ void Player_ApplyParentRelativeTransform(Player *p, int windowIndex, RECT newRec
     float stepScaleX = (float)(newRect.right - newRect.left) / (float)lastW;
     float stepScaleY = (float)(newRect.bottom - newRect.top) / (float)lastH;
 
-    int newW = (int)((float)p->width * stepScaleX);
-    int newH = (int)((float)p->height * stepScaleY);
+    /* (int)キャストによる単純な切り捨てだと常に「0方向」へ丸められ、縮小/
+       拡大を1フレームごとに積み重ねる差分方式ではこの偏りが毎フレーム
+       蓄積する -- 同じウィンドウサイズまで縮小してから元に戻しても、
+       プレイヤーが元の大きさに戻らずわずかに小さいまま、という形で顕在化
+       する（実際に報告された不具合）。位置の計算と同じPlayerRoundToNearest
+       （四捨五入）を使うことで、丸めの偏りを無くし蓄積誤差を防ぐ。 */
+    int newW = PlayerRoundToNearest((float)p->width * stepScaleX);
+    int newH = PlayerRoundToNearest((float)p->height * stepScaleY);
     if (newW < PLAYER_MIN_SIZE)
         newW = PLAYER_MIN_SIZE;
     if (newH < PLAYER_MIN_SIZE)
@@ -484,7 +490,12 @@ void Player_ApplyParentRelativeTransform(Player *p, int windowIndex, RECT newRec
     {
         int dx, dy, dw, dh;
         GetPlayerDisplayRect(p, &dx, &dy, &dw, &dh);
-        SetWindowPos(p->hwnd, NULL, dx, dy, dw, dh, SWP_NOZORDER | SWP_NOACTIVATE);
+        /* SWP_NOREDRAW: 位置とサイズが同時に変わるため、これを付けないとOS側が
+           SetWindowPosの中で古い内容を新しい位置/サイズへ引き伸ばして即座に
+           描画してしまうことがあり、すぐ下の同期的なInvalidateRect+
+           UpdateWindowによる正しい描画で1フレームごとに上書きされる形になって
+           がくがくして見える（UpdateUnconstrainedの反転時と同じ原因）。 */
+        SetWindowPos(p->hwnd, NULL, dx, dy, dw, dh, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
         InvalidateRect(p->hwnd, NULL, FALSE);
         /* レイヤードカラーキーウィンドウを拡大すると、次のWM_PAINTが実際に
            マゼンタのカラーキー+本体でそこを塗りつぶすまで、新しく露出した
@@ -528,7 +539,7 @@ void Player_MirrorWithinParent(Player *p, int windowIndex, RECT parentBounds, in
     {
         int dx, dy, dw, dh;
         GetPlayerDisplayRect(p, &dx, &dy, &dw, &dh);
-        SetWindowPos(p->hwnd, NULL, dx, dy, dw, dh, SWP_NOZORDER | SWP_NOACTIVATE);
+        SetWindowPos(p->hwnd, NULL, dx, dy, dw, dh, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
         InvalidateRect(p->hwnd, NULL, FALSE);
         UpdateWindow(p->hwnd);
     }

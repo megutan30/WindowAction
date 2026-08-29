@@ -408,8 +408,19 @@ static void UpdateUnconstrained(int index, GameWindowData *data)
     if (outer.left != visualLeft || outer.top != visualTop ||
         (outer.right - outer.left) != validated.cx || (outer.bottom - outer.top) != validated.cy)
     {
+        /* 反転中は移動+リサイズが同時に起きる（visualLeft/Topが毎フレーム
+           動く）。SWP_NOREDRAWを付けずに位置とサイズを同時に変えると、OS側が
+           SetWindowPosの中で（このすぐ下の明示的なInvalidateRect+UpdateWindow
+           より前に）古い内容を新しい位置/サイズへ引き伸ばして即座に描画
+           してしまうことがあり、これが1フレームごとに新しい正しい描画で
+           上書きされる形になって、見た目上がくがくして見える（実際に報告
+           された不具合: 反転中に伸ばすとタイトルバーが滑らかに動かない）。
+           単純な移動のみ(UpdateMovable)や単純なリサイズのみ(UpdateResizable、
+           SWP_NOMOVE)ではこの同時発生が起きないため気付かれなかった。
+           SWP_NOREDRAWでOS側の自動再描画を止め、このすぐ下の同期的な
+           InvalidateRect+UpdateWindowだけが実際の描画を行うようにする。 */
         SetWindowPos(data->hwnd, NULL, visualLeft, visualTop, validated.cx, validated.cy,
-                     SWP_NOZORDER | SWP_NOACTIVATE);
+                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
 
         /* 子の追従はHierarchy_ApplyScaleではなくHierarchy_ApplyRelativeTransform
            を使う: 通常のResizableと違い、アンカー基準の反転で親の可視矩形の
