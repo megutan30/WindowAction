@@ -15,7 +15,8 @@
 #define GROUND_CHECK_H 15
 
 /* 前方宣言: 実体は移動可能領域ロジックの他の部分と一緒に後で定義されるが、
-   Player_ApplyParentScaleが位置の再クランプのためにそれより前に必要とする。 */
+   Player_ApplyParentRelativeTransformが位置の再クランプのためにそれより
+   前に必要とする。 */
 static int IsValidMove(RECT bounds, int parentIdx);
 
 static const char *kPlayerWindowClass = "WA_Player";
@@ -394,20 +395,72 @@ void Player_FollowParentMove(Player *p, int parentIdx, int dx, int dy)
     }
 }
 
-void Player_ApplyParentScale(Player *p, int windowIndex, float scaleX, float scaleY)
+static int PlayerRoundToNearest(float v)
 {
-    if (p->parentIdx != windowIndex || p->origSize.cx <= 0 || p->origSize.cy <= 0)
+    return (v >= 0.0f) ? (int)(v + 0.5f) : (int)(v - 0.5f);
+}
+
+void Player_ApplyParentRelativeTransform(Player *p, int windowIndex, RECT oldRect, RECT newRect)
+{
+    if (p->parentIdx != windowIndex)
         return;
 
-    int newW = (int)(p->origSize.cx * scaleX);
-    int newH = (int)(p->origSize.cy * scaleY);
+    int oldW = oldRect.right - oldRect.left;
+    int oldH = oldRect.bottom - oldRect.top;
+    if (oldW <= 0 || oldH <= 0)
+        return;
+
+    /* このリサイズ世代でまだ一度もこの関数に触れられていない場合（ドラッグ
+       開始後に新たにこの親の内部に入ってきた等）は、現在の位置・サイズを
+       この場でベースラインとして確立する -- Hierarchy_ApplyRelativeTransform
+       の通常の子ウィンドウ用セーフティネットと同じ考え方。lastAppliedParentRect
+       も併せてoldRect（このジェスチャーの開始時点の親矩形）から始める。 */
+    if (p->origSizeGen != g_resizeGeneration)
+    {
+        p->origSize.cx = p->width;
+        p->origSize.cy = p->height;
+        Player_GetBounds(p, &p->origBoundsAtResizeStart);
+        p->lastAppliedParentRect = oldRect;
+        p->origSizeGen = g_resizeGeneration;
+    }
+
+    /* サイズは通常の子ウィンドウと同じく、ジェスチャー開始時点(oldRect)からの
+       累積スケールで求める -- サイズはプレイヤー自身の操作では変化しない
+       ため、毎フレーム再計算しても丸め誤差が蓄積する心配がない。 */
+    float cumulativeScaleX = (float)(newRect.right - newRect.left) / (float)oldW;
+    float cumulativeScaleY = (float)(newRect.bottom - newRect.top) / (float)oldH;
+
+    int newW = (int)(p->origSize.cx * cumulativeScaleX);
+    int newH = (int)(p->origSize.cy * cumulativeScaleY);
     if (newW < PLAYER_MIN_SIZE)
         newW = PLAYER_MIN_SIZE;
     if (newH < PLAYER_MIN_SIZE)
         newH = PLAYER_MIN_SIZE;
 
+    /* 位置はジェスチャー開始時点ではなく、前回この関数を適用した時点の親矩形
+       (lastAppliedParentRect)からの差分だけを、プレイヤーの「現在の」位置
+       （Player_Updateによる歩行移動を既に反映済みかもしれない）に対して
+       適用する。ジェスチャー開始時点からの累積再計算にすると、リサイズ中に
+       プレイヤーが歩いた分がフレームごとに上書きされて元の相対位置へ
+       戻されてしまう（実際に報告された不具合）。差分適用にすることで、
+       歩行による移動とリサイズによる相対位置追従を両立させる。 */
+    int lastW = p->lastAppliedParentRect.right - p->lastAppliedParentRect.left;
+    int lastH = p->lastAppliedParentRect.bottom - p->lastAppliedParentRect.top;
+    int newX = (int)p->x;
+    int newY = (int)p->y;
+    if (lastW > 0 && lastH > 0)
+    {
+        float stepScaleX = (float)(newRect.right - newRect.left) / (float)lastW;
+        float stepScaleY = (float)(newRect.bottom - newRect.top) / (float)lastH;
+        newX = newRect.left + PlayerRoundToNearest((float)((int)p->x - p->lastAppliedParentRect.left) * stepScaleX);
+        newY = newRect.top + PlayerRoundToNearest((float)((int)p->y - p->lastAppliedParentRect.top) * stepScaleY);
+    }
+    p->lastAppliedParentRect = newRect;
+
     p->width = newW;
     p->height = newH;
+    p->x = (float)newX;
+    p->y = (float)newY;
 
     /* AdjustPositionAfterResize: 新しい境界が親自身の境界に収まらなくなった
        場合、位置をその中にクランプし直す（C#側のフォールバックに合わせ、
@@ -415,13 +468,13 @@ void Player_ApplyParentScale(Player *p, int windowIndex, float scaleX, float sca
     RECT parentBounds;
     GetWindowFullBounds(g_windows[windowIndex].hwnd, &parentBounds);
 
-    RECT proposed = {(int)p->x, (int)p->y, (int)p->x + newW, (int)p->y + newH};
+    RECT proposed = {newX, newY, newX + newW, newY + newH};
     if (!IsValidMove(proposed, windowIndex))
     {
         int maxX = parentBounds.right - newW;
         int maxY = parentBounds.bottom - newH;
-        int clampedX = (int)p->x;
-        int clampedY = (int)p->y;
+        int clampedX = newX;
+        int clampedY = newY;
         if (clampedX < parentBounds.left)
             clampedX = parentBounds.left;
         if (clampedX > maxX)
@@ -828,6 +881,19 @@ static void HandleWindowTransitions(Player *p, RECT newBounds)
     }
     else
     {
+        /* 現在の親が最小化アニメーション中(SetWindowMinimized参照)なら、
+           その実ウィンドウ矩形は一時的にMINIMIZE_ANIM_POINT_SIZEの点へ向けて
+           縮んでいる最中で、プレイヤーの現在位置を全く含まなくなる。ここで
+           毎フレームの再判定をそのまま適用すると、アニメーション完了時に
+           Hierarchy_MinimizeSubtreeが実行される前にparentIdxが他へ移って
+           しまい、本来一緒に凍結されるべきプレイヤーが最小化を免れてしまう
+           （実際に報告された不具合）。アニメーション中は再判定自体をスキップし、
+           Hierarchy_MinimizeSubtreeが正しくこのウィンドウを親として見つけて
+           Player_OnMinimizeを呼べるようにする。 */
+        GameWindowData *curParent = GetWindowData(p->parentIdx);
+        if (curParent && curParent->minimizeAnimState != 0)
+            return;
+
         int newWin = WindowQuery_GetTopWindowAt(newBounds, p->parentIdx);
         if (newWin >= 0 && newWin != p->parentIdx)
             p->parentIdx = newWin;
@@ -1333,9 +1399,16 @@ void Player_OnMinimize(Player *p)
        設定する -- 内部フラグだけではなく、実際のWin32の最小化（非表示になり
        タスクバーボタンとして表示される）。これがないと、物理演算は既に
        停止しているのにプレイヤーは完全に表示されたままドラッグ可能な
-       ように見えてしまう。 */
+       ように見えてしまう。
+       SW_SHOWMINIMIZEDではなくSW_MINIMIZEを使う: 前者はウィンドウを
+       アクティブ化した上で最小化するため、最小化後もプレイヤー自身の
+       ウィンドウがキーボードフォーカスを持ったままになり、その状態で
+       移動キー（方向キー相当）を押すとWindows標準のアイコンナビゲーション
+       処理が働いて警告音が鳴ってしまう（実際に報告された不具合）。
+       SW_MINIMIZEはアクティブ化せずZオーダー上の次のウィンドウへ
+       フォーカスを譲るため、この副作用が起きない。 */
     if (p->hwnd)
-        ShowWindow(p->hwnd, SW_SHOWMINIMIZED);
+        ShowWindow(p->hwnd, SW_MINIMIZE);
 }
 
 void Player_OnRestore(Player *p)

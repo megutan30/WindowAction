@@ -8,7 +8,16 @@ typedef struct {
     float x, y;   /* 左上座標、スクリーン座標系（滑らかな物理演算のためfloat） */
     int width, height; /* 現在のサイズ -- 可変: リサイズされる親に合わせてスケーリングされる */
     SIZE origSize; /* スケール基準サイズ -- origSizeGen を参照 */
-    int origSizeGen; /* origSize が最後に確定した時点の g_resizeGeneration の値 */
+    int origSizeGen; /* origSize/origBoundsAtResizeStart が最後に確定した時点の g_resizeGeneration の値 */
+    RECT origBoundsAtResizeStart; /* Player_ApplyParentRelativeTransform専用: ジェスチャー開始時点の絶対位置(サイズのスケール基準) */
+    /* Player_ApplyParentRelativeTransform専用: 直近にこの関数を適用した時点の
+       親の可視矩形。位置の追従だけはorigBoundsAtResizeStart(ジェスチャー開始
+       時点)ではなくこちらをフレームごとの基準にする -- そうしないと、
+       リサイズ中にプレイヤー自身が歩いて動いた分が、次のフレームで
+       「ジェスチャー開始時点の位置からの再計算」により上書きされて戻されて
+       しまう（実際に報告された不具合）。フレームごとの差分だけを適用する
+       ことで、歩行による移動とリサイズによる追従を両立させる。 */
+    RECT lastAppliedParentRect;
     float vy;
     int grounded;
     int facingRight;
@@ -43,11 +52,15 @@ Player *Player_GetActive(void);
    完全に含む、最も前面（最高Z-order）のウィンドウを選ぶ。 */
 void Player_AssignInitialParent(Player *p);
 
-/* プレイヤーの現在の親が `windowIndex` の場合、origSize
-   （現在のリサイズ世代に対して Hierarchy_ApplyScale が遅延確定させたもの）から
-   再スケーリングし、ウィンドウの新しい境界内に位置を再クランプする。
-   PlayerForm.ApplyEffect(ResizeEffect) + AdjustPositionAfterResize を反映。 */
-void Player_ApplyParentScale(Player *p, int windowIndex, float scaleX, float scaleY);
+/* プレイヤーの現在の親が `windowIndex` の場合、`oldRect`→`newRect`への変換
+   （ジェスチャー開始時点の親の可視矩形→現在フレームでの可視矩形、
+   GameWindowData.origBoundsAtResizeStartと同じ考え方）に合わせて、
+   origSize/origBoundsAtResizeStartを基準にサイズと相対位置の両方を追従
+   させる。通常の子ウィンドウ(Hierarchy_ApplyRelativeTransform)と同じ
+   「親に対する相対位置・相対サイズを保つ」挙動を、通常のResizableと
+   制限なしリサイズの両方の子であるプレイヤーにも適用する。最終的に
+   ウィンドウの新しい境界内に収まるよう位置を再クランプする。 */
+void Player_ApplyParentRelativeTransform(Player *p, int windowIndex, RECT oldRect, RECT newRect);
 
 /* プレイヤーをフリーズさせ（Player_Update が何もしなくなる）、現在の親から
    切り離し、後の Player_OnRestore のために記憶しておく。プレイヤーが乗っている

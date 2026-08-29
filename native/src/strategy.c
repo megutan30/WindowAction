@@ -55,8 +55,9 @@ void Strategy_HandleMouseDown(int index)
            たびに空から始まり、RecordOriginalSizesRecursiveによって埋められる
            挙動を踏襲している。このジェスチャーの途中で子になったもの
            （プレイヤーが歩いて入ってくる、ゴール/ボタンがドラッグで
-           乗せられる）は、代わりにHierarchy_ApplyScaleが初めて触れられた
-           際に currentSize/scale を遅延的に逆算するフォールバックに任される。
+           乗せられる）は、代わりにHierarchy_ApplyRelativeTransformが初めて
+           触れられた際に currentSize/scale を遅延的に逆算するフォールバックに
+           任される。
            これはオリジナルの "if (!originalSizes.ContainsKey(child))"
            フォールバックと同じで、ドラッグ開始後にウィンドウが既にどれだけ
            拡大縮小していたかに関わらず、いきなりcurrentSize倍にジャンプ
@@ -313,15 +314,18 @@ static void UpdateResizable(int index, GameWindowData *data)
         SetWindowPos(data->hwnd, NULL, 0, 0, validated.cx, validated.cy,
                      SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 
-        /* スケールは常にドラッグ開始時に記録されたサイズを基準とし、直前の
-           フレームは基準にしない -- ResizableWindowStrategyがジェスチャー
-           全体を通して単一のキャッシュされた`originalSize`を使う挙動と
-           一致させている。Hierarchy_ApplyScale自体がすべての再帰レベルで
-           （ここではrootIndex==indexから始まる）プレイヤーとゴールをチェック
-           するため、このトップレベルで別途呼び出す必要はない。 */
-        float scaleX = (float)validated.cx / (float)data->resizeOrigSize.cx;
-        float scaleY = (float)validated.cy / (float)data->resizeOrigSize.cy;
-        Hierarchy_ApplyScale(index, scaleX, scaleY);
+        /* 子/孫は絶対位置を固定したまま拡大縮小するHierarchy_ApplyScaleでは
+           なく、制限なしリサイズと同じHierarchy_ApplyRelativeTransformを使う
+           -- 親に対する相対位置・相対サイズを保ったまま追従させる。基準は
+           常にドラッグ開始時点のrootOrigRect（このウィンドウ自身の左上は
+           SWP_NOMOVEで固定されたままなので、outer.left/topは開始時から
+           不変）で、直前のフレームは基準にしない -- ResizableWindowStrategyが
+           ジェスチャー全体を通して単一のキャッシュされた`originalSize`を
+           使う挙動と一致させている。 */
+        RECT rootOrigRect = {outer.left, outer.top, outer.left + data->resizeOrigSize.cx,
+                              outer.top + data->resizeOrigSize.cy};
+        RECT rootNewRect = {outer.left, outer.top, outer.left + validated.cx, outer.top + validated.cy};
+        Hierarchy_ApplyRelativeTransform(index, rootOrigRect, rootNewRect, MIN_WINDOW_SIZE, MAX_WINDOW_SIZE);
 
         InvalidateRect(data->hwnd, NULL, FALSE);
         /* 拡大直後、実際にWM_PAINTで塗りつぶされるまで新しい領域が黒く
@@ -422,7 +426,7 @@ static void UpdateUnconstrained(int index, GameWindowData *data)
         int origVisualTop = origFlipY ? (data->unconstrainedAnchor.y - origAbsH) : data->unconstrainedAnchor.y;
         RECT rootOrigRect = {origVisualLeft, origVisualTop, origVisualLeft + origAbsW, origVisualTop + origAbsH};
         RECT rootNewRect = {visualLeft, visualTop, visualLeft + validated.cx, visualTop + validated.cy};
-        Hierarchy_ApplyRelativeTransform(index, rootOrigRect, rootNewRect);
+        Hierarchy_ApplyRelativeTransform(index, rootOrigRect, rootNewRect, UNCONSTRAINED_MIN_ABS_SIZE, MAX_WINDOW_SIZE);
 
         /* 反転イベントが起きた軸だけ、その時点の全子孫のinheritedFlipX/Yを
            永続的にXORで反転させる。親から切り離された後もこの見た目は

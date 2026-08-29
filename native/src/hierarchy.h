@@ -17,21 +17,18 @@ void Hierarchy_PropagateMove(int index, int dx, int dy);
    呼び出す。ResizableWindowStrategy.RecordOriginalSizesRecursiveを踏襲。 */
 void Hierarchy_RecordOriginalSizes(int rootIndex);
 
-/* `rootIndex`の全子孫を、記録済みのorigSizeから(scaleX, scaleY)倍にリスケール
-   する。位置(X,Y)は変更しない -- 実ゲームのResizeEffectはUpdateTargetSizeのみ
-   呼び出し、UpdateTargetPositionは呼び出さないため、子要素は絶対スクリーン位置
-   を保ったまま拡大縮小のみ行う。 */
-void Hierarchy_ApplyScale(int rootIndex, float scaleX, float scaleY);
-
-/* Hierarchy_ApplyScaleの「相対位置も保つ」版。WT_UNCONSTRAINED(制限なし
-   リサイズ+反転ウィンドウ)専用: アンカー基準の反転により親の可視矩形の
-   左上そのものが動く/反転しうるため、子の絶対位置を固定したままサイズだけ
-   変えるとcの相対配置が崩れる。`oldRect`はrootIndex自身のジェスチャー開始時
-   点の可視矩形、`newRect`は現在フレームでの可視矩形。子（Goal/ボタンを除く）
-   はrootIndexに対する相対オフセット・相対サイズを保ったまま追従する。
-   Player/Goal/ボタンはHierarchy_ApplyScaleと同じ「サイズのみ変更、位置固定」
-   のまま扱う（内部でApplyScaleToSpecialChildren相当を呼ぶ）。 */
-void Hierarchy_ApplyRelativeTransform(int rootIndex, RECT oldRect, RECT newRect);
+/* `rootIndex`の全子孫（Goal/ボタンを除く）を、記録済みのorigBoundsAtResizeStart
+   （ジェスチャー開始時点の絶対矩形）から`oldRect`→`newRect`への変換に合わせて
+   相対位置・相対サイズを保ったまま追従させる。通常のResizable
+   （UpdateResizable、位置は常にSWP_NOMOVEで固定なのでoldRect/newRectは
+   左上が同じ）と制限なしリサイズ+反転ウィンドウ（UpdateUnconstrained、
+   アンカー基準の反転で左上そのものが動く/反転しうる）の両方から使う共通
+   実装。`minSize`/`maxSize`は子の拡大縮小に課す下限/上限で、呼び出し元が
+   自分の種別に応じたものを渡す（通常のResizableはMIN_WINDOW_SIZE、制限
+   なしリサイズはより小さいUNCONSTRAINED_MIN_ABS_SIZE）。Player/Goal/ボタン
+   は「サイズのみ変更、位置固定」のまま扱う（内部でApplyScaleToSpecialChildren
+   相当を呼ぶ）。 */
+void Hierarchy_ApplyRelativeTransform(int rootIndex, RECT oldRect, RECT newRect, int minSize, int maxSize);
 
 /* `rootIndex`が今まさに反転イベントを起こした瞬間に一度だけ呼ぶ。その時点の
    全子孫（Hierarchy_ApplyRelativeTransformと違い、Goal/ボタンも含め無条件）の

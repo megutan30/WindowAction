@@ -155,8 +155,8 @@ static void ApplyScaleToGoalIfParented(int rootIndex, float scaleX, float scaleY
     InvalidateRect(goal->hwnd, NULL, FALSE);
     /* InvalidateRectだけでは再描画が次のメッセージループパスまで遅延され、
        拡大した分の新しい領域が実際に塗りつぶされるまで黒いフラッシュとして
-       見えてしまう（Player_ApplyParentScaleと同じ問題）。UpdateWindowで
-       同期的にWM_PAINTを強制し、その隙間を埋める。 */
+       見えてしまう（Player_ApplyParentRelativeTransformと同じ問題）。
+       UpdateWindowで同期的にWM_PAINTを強制し、その隙間を埋める。 */
     UpdateWindow(goal->hwnd);
 }
 
@@ -192,82 +192,21 @@ static void ApplyScaleToButtonsIfParented(int rootIndex, float scaleX, float sca
    それらに到達する -- ユーザーがドラッグしているウィンドウの直下に
    いる場合だけではない。すべての再帰レベルでチェックする（最上位だけ
    ではなく）ことで、孫の中にネストされたプレイヤーやゴールも正しく
-   伝播したスケールを受け取れる。Hierarchy_ApplyScaleとHierarchy_ApplyRelative
-   Transformの両方から共有される（Player/Goal/ボタンはどちらの経路でも
-   「サイズのみ変更、位置固定」のまま扱う）。 */
-static void ApplyScaleToSpecialChildren(int rootIndex, float scaleX, float scaleY)
+   伝播したスケールを受け取れる。Hierarchy_ApplyRelativeTransformの
+   全再帰レベルから呼ばれる。プレイヤーは通常の子ウィンドウと同じく
+   親に対する相対位置・相対サイズを保つ（Player_ApplyParentRelativeTransform）
+   一方、Goal/ボタンは元のC#実装と同じ「サイズのみ変更、位置固定」のまま
+   扱う。 */
+static void ApplyScaleToSpecialChildren(int rootIndex, RECT oldRect, RECT newRect, float scaleX, float scaleY)
 {
     Player *p = Player_GetActive();
     if (p && p->parentIdx == rootIndex)
-    {
-        EnsureOrigSizeForGeneration(&p->origSizeGen, &p->origSize, p->width, p->height, scaleX, scaleY);
-        Player_ApplyParentScale(p, rootIndex, scaleX, scaleY);
-    }
+        Player_ApplyParentRelativeTransform(p, rootIndex, oldRect, newRect);
     ApplyScaleToGoalIfParented(rootIndex, scaleX, scaleY);
     ApplyScaleToButtonsIfParented(rootIndex, scaleX, scaleY);
 }
 
-void Hierarchy_ApplyScale(int rootIndex, float scaleX, float scaleY)
-{
-    GameWindowData *root = GetWindowData(rootIndex);
-    if (!root)
-        return;
-
-    ApplyScaleToSpecialChildren(rootIndex, scaleX, scaleY);
-
-    for (int i = 0; i < root->childCount; i++)
-    {
-        GameWindowData *child = GetWindowData(root->childIdx[i]);
-        if (!child || !child->hwnd)
-            continue;
-        /* Goalとボタン自身のリサイズ追従（20x20 / 150x40の下限、このループの
-           100x100とは異なる）は上ですでに個別処理済み -- ここではスキップし、
-           異なる2つのサイズ下限で二重にリサイズされないようにする。 */
-        if (child->kind == WT_GOAL || IsButtonWindowKind(child->kind))
-            continue;
-
-        /* Hierarchy_RecordOriginalSizesがこのドラッグに対してすでに実行済み
-           の後で（別ウィンドウのマウスアップ時にHierarchy_CheckAndUpdate経由で
-           再親化されて）ジェスチャー途中に子になったウィンドウのための
-           セーフティネット。 */
-        if (child->origSizeGen != g_resizeGeneration)
-        {
-            RECT cr;
-            GetWindowRect(child->hwnd, &cr);
-            EnsureOrigSizeForGeneration(&child->origSizeGen, &child->origSize,
-                                         cr.right - cr.left, cr.bottom - cr.top, scaleX, scaleY);
-        }
-
-        int newW = RoundToNearest((float)child->origSize.cx * scaleX);
-        int newH = RoundToNearest((float)child->origSize.cy * scaleY);
-        if (newW < MIN_WINDOW_SIZE)
-            newW = MIN_WINDOW_SIZE;
-        if (newW > MAX_WINDOW_SIZE)
-            newW = MAX_WINDOW_SIZE;
-        if (newH < MIN_WINDOW_SIZE)
-            newH = MIN_WINDOW_SIZE;
-        if (newH > MAX_WINDOW_SIZE)
-            newH = MAX_WINDOW_SIZE;
-
-        SetWindowPos(child->hwnd, NULL, 0, 0, newW, newH,
-                     SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-        InvalidateRect(child->hwnd, NULL, FALSE);
-        UpdateWindow(child->hwnd); /* ゴールと同じ黒フラッシュ対策: 拡大直後に同期再描画 */
-
-        /* ApplyScaleToChildrenRecursiveは、この子自身のmin/maxクランプ適用後に
-           actualScale = newSize/origSizeを再計算し、それを孫に伝播する
-           （ルートから渡された生のスケールではない）-- そのため、階層の途中で
-           100x100の下限に張り付いた子でも、古くなったスケール係数で過剰/過小に
-           縮小することなく、実際に着地したサイズを基準に自身の子孫を正しく
-           スケーリングできる。 */
-        float actualScaleX = (float)newW / (float)child->origSize.cx;
-        float actualScaleY = (float)newH / (float)child->origSize.cy;
-
-        Hierarchy_ApplyScale(root->childIdx[i], actualScaleX, actualScaleY);
-    }
-}
-
-void Hierarchy_ApplyRelativeTransform(int rootIndex, RECT oldRect, RECT newRect)
+void Hierarchy_ApplyRelativeTransform(int rootIndex, RECT oldRect, RECT newRect, int minSize, int maxSize)
 {
     GameWindowData *root = GetWindowData(rootIndex);
     if (!root)
@@ -281,9 +220,7 @@ void Hierarchy_ApplyRelativeTransform(int rootIndex, RECT oldRect, RECT newRect)
     float scaleX = (float)(newRect.right - newRect.left) / (float)oldW;
     float scaleY = (float)(newRect.bottom - newRect.top) / (float)oldH;
 
-    /* Player/Goal/ボタンは従来通り「サイズのみ変更、位置固定」のまま
-       （Hierarchy_ApplyScaleと共有）。 */
-    ApplyScaleToSpecialChildren(rootIndex, scaleX, scaleY);
+    ApplyScaleToSpecialChildren(rootIndex, oldRect, newRect, scaleX, scaleY);
 
     for (int i = 0; i < root->childCount; i++)
     {
@@ -295,7 +232,7 @@ void Hierarchy_ApplyRelativeTransform(int rootIndex, RECT oldRect, RECT newRect)
 
         /* ジェスチャー開始時点の記録が無い（Hierarchy_RecordOriginalSizes後に
            途中で子になった）場合は、現在のrectをこの場でベースラインとして
-           確立する -- Hierarchy_ApplyScaleの同種のセーフティネットと同じ考え方。 */
+           確立する。 */
         if (child->origSizeGen != g_resizeGeneration)
         {
             RECT cr;
@@ -310,22 +247,21 @@ void Hierarchy_ApplyRelativeTransform(int rootIndex, RECT oldRect, RECT newRect)
 
         int newW = RoundToNearest((float)child->origSize.cx * scaleX);
         int newH = RoundToNearest((float)child->origSize.cy * scaleY);
-        /* Hierarchy_ApplyScale(通常のResizable用)と異なりMIN_WINDOW_SIZE(100)
-           では下限を課さない -- 制限なしリサイズの子孫は、親自身と同じ
-           UNCONSTRAINED_MIN_ABS_SIZE(20)までの縮小を許容する。 */
-        if (newW < UNCONSTRAINED_MIN_ABS_SIZE)
-            newW = UNCONSTRAINED_MIN_ABS_SIZE;
-        if (newW > MAX_WINDOW_SIZE)
-            newW = MAX_WINDOW_SIZE;
-        if (newH < UNCONSTRAINED_MIN_ABS_SIZE)
-            newH = UNCONSTRAINED_MIN_ABS_SIZE;
-        if (newH > MAX_WINDOW_SIZE)
-            newH = MAX_WINDOW_SIZE;
+        /* 下限/上限はrootIndex側の呼び出し元から渡される -- 通常のResizable
+           はMIN_WINDOW_SIZE(100)、制限なしリサイズはより小さいUNCONSTRAINED_
+           MIN_ABS_SIZE(20)を使う（UpdateResizable/UpdateUnconstrained参照）。 */
+        if (newW < minSize)
+            newW = minSize;
+        if (newW > maxSize)
+            newW = maxSize;
+        if (newH < minSize)
+            newH = minSize;
+        if (newH > maxSize)
+            newH = maxSize;
 
         /* 親(root)に対する相対オフセットも同じスケールで追従させる -- これに
-           より、アンカー基準の反転で親の可視矩形の左上そのものが動いても、
-           子は親の中の同じ相対位置・相対サイズを保つ（絶対位置を固定する
-           Hierarchy_ApplyScaleとの違い）。 */
+           より、子は親の中の同じ相対位置・相対サイズを保つ（絶対位置を
+           固定していた旧Hierarchy_ApplyScaleとの違い）。 */
         int newX = newRect.left + RoundToNearest((float)(childOldRect.left - oldRect.left) * scaleX);
         int newY = newRect.top + RoundToNearest((float)(childOldRect.top - oldRect.top) * scaleY);
 
@@ -334,7 +270,7 @@ void Hierarchy_ApplyRelativeTransform(int rootIndex, RECT oldRect, RECT newRect)
         UpdateWindow(child->hwnd);
 
         RECT childNewRect = {newX, newY, newX + newW, newY + newH};
-        Hierarchy_ApplyRelativeTransform(root->childIdx[i], childOldRect, childNewRect);
+        Hierarchy_ApplyRelativeTransform(root->childIdx[i], childOldRect, childNewRect, minSize, maxSize);
     }
 }
 
@@ -532,7 +468,15 @@ void Hierarchy_MinimizeSubtree(int index)
         Hierarchy_Detach(index);
 
     data->minimized = 1;
-    ShowWindow(data->hwnd, SW_SHOWMINIMIZED);
+    /* SW_SHOWMINIMIZEDは「ウィンドウをアクティブ化した上で」最小化表示する
+       ため、この最小化されたウィンドウがキーボードフォーカスを持ったままに
+       なる。フォーカスを持つ最小化(アイコン化)ウィンドウに方向キー等が
+       送られると、Windows標準のアイコンナビゲーション処理が働き行き先が
+       無いため警告音が鳴る（実際に報告された不具合）。SW_MINIMIZEは
+       アクティブ化せず（Zオーダー上の次のトップレベルウィンドウへ
+       フォーカスを譲る）、同じくタスクバー表示・WINDOWPLACEMENTの更新は
+       行われるため、ここでは意図的にこちらを使う。 */
+    ShowWindow(data->hwnd, SW_MINIMIZE);
 
     /* オリジナル実装ではPlayerFormも単なる別のIEffectTarget子要素であるため、
        このサブツリー内の他のGameWindow/Goalと同様に直接OnMinimize()呼び出しを
@@ -540,6 +484,32 @@ void Hierarchy_MinimizeSubtree(int index)
     Player *p = Player_GetActive();
     if (p && p->parentIdx == index)
         Player_OnMinimize(p);
+
+    /* Goal/ボタンはPlayerと同じくchildIdx[]には入らずparentIdxのみで
+       追跡される（Hierarchy_ToggleInheritedFlip/ApplyScaleToSpecialChildren
+       参照）。ここで明示的に扱わないと、親ウィンドウが最小化で消えても
+       Goal/ボタンだけが取り残されて表示され続けてしまう（実際に報告された
+       不具合）。通常の子と同じく非表示にし、親から切り離す。 */
+    int goalIdx = FindGoalIndex();
+    if (goalIdx >= 0)
+    {
+        GameWindowData *goal = &g_windows[goalIdx];
+        if (goal->hwnd && !goal->minimized && goal->parentIdx == index)
+        {
+            goal->minimized = 1;
+            goal->parentIdx = -1;
+            ShowWindow(goal->hwnd, SW_MINIMIZE);
+        }
+    }
+    for (int i = 0; i < g_windowCount; i++)
+    {
+        GameWindowData *btn = &g_windows[i];
+        if (!IsButtonWindowKind(btn->kind) || !btn->hwnd || btn->minimized || btn->parentIdx != index)
+            continue;
+        btn->minimized = 1;
+        btn->parentIdx = -1;
+        ShowWindow(btn->hwnd, SW_MINIMIZE);
+    }
 }
 
 void Hierarchy_RestoreWindow(int index)

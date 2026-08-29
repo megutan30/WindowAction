@@ -75,7 +75,7 @@ typedef struct {
     int childIdx[MAX_CHILDREN];
     int childCount;
     SIZE origSize;      /* リサイズ操作開始時点のサイズ（スケール伝播用） */
-    int origSizeGen;    /* origSizeが最後に確立された時点のg_resizeGeneration値 -- Hierarchy_ApplyScale参照 */
+    int origSizeGen;    /* origSizeが最後に確立された時点のg_resizeGeneration値 -- Hierarchy_ApplyRelativeTransform参照 */
     RECT origBoundsAtResizeStart;
 
     /* Movable（移動可能）ドラッグ状態。lastMouseはMovableWindowStrategy.lastMousePos
