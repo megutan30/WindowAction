@@ -42,7 +42,7 @@ cl.exe /nologo /W3 /O1 /GL /MT /std:c17 /DWIN32_LEAN_AND_MEAN %DEVDEFINE% ^
     /Fo:build\ /Fe:build\WindowAction.exe ^
     /link /LTCG /OPT:REF /OPT:ICF /INCREMENTAL:NO /SUBSYSTEM:WINDOWS ^
     build\resource.res ^
-    user32.lib gdi32.lib kernel32.lib
+    user32.lib gdi32.lib kernel32.lib dwmapi.lib
 
 if errorlevel 1 (
     echo Build failed

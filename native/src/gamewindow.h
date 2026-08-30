@@ -1,6 +1,12 @@
 #ifndef GAMEWINDOW_H
 #define GAMEWINDOW_H
 
+/* DWMのアイコン化サムネイル/ライブプレビューAPI(dwmapi.h、gamewindow.c参照)
+   はWindows 7以降が対象。 */
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0601
+#endif
+
 #include <windows.h>
 
 #define MAX_WINDOWS 32
@@ -127,6 +133,12 @@ typedef struct {
     float minimizeAnimT;
     RECT minimizeAnimFrom;
     RECT minimizeAnimTo;
+    /* 縮小アニメーションを開始する直前にフルサイズの見た目を1回だけ
+       キャプチャしておいたもの。DWMのタスクバーサムネイル/ライブプレビューは
+       ウィンドウが最後に描画した内容をそのまま使うため、何もしないと
+       数px四方まで縮んだ後の内容がサムネイルになってしまう
+       （WM_DWMSENDICONICTHUMBNAIL/WM_DWMSENDICONICLIVEPREVIEWBITMAP参照）。 */
+    HBITMAP iconicBitmap;
 
 #ifdef ENABLE_STAGE_EDITOR
     /* WT_BTN_PALETTEの場合のみ意味を持つ: ドラッグでどの種別を配置するか、

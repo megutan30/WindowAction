@@ -8,6 +8,7 @@
 #include "editor.h"
 #include <stdio.h>
 #include <math.h>
+#include <dwmapi.h>
 
 GameWindowData g_windows[MAX_WINDOWS];
 int g_windowCount = 0;
@@ -674,6 +675,135 @@ static void PaintGameWindow(HWND hwnd, int index)
     EndPaint(hwnd, &ps);
 }
 
+/* CaptureIconicBitmap/CopyBitmapScaled共通: DWMのDwmSetIconicThumbnail/
+   DwmSetIconicLivePreviewBitmapに渡すビットマップは、32bpp・トップダウンの
+   DIBセクションである必要がある（MSDNのサンプルもこの形式を使う）。
+   CreateCompatibleBitmapで作った通常のDDBを渡すと、DWM側で受理されず
+   タスクバーのサムネイルが「更新中」のまま止まってしまうことがある
+   （実際に報告された不具合）。 */
+static HBITMAP CreateArgbDibSection(HDC referenceDC, int w, int h)
+{
+    BITMAPINFO bmi;
+    ZeroMemory(&bmi, sizeof(bmi));
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = w;
+    bmi.bmiHeader.biHeight = -h; /* トップダウン(上から下)で格納する */
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    void *bits = NULL;
+    return CreateDIBSection(referenceDC, &bmi, DIB_RGB_COLORS, &bits, NULL, 0);
+}
+
+/* 縮小アニメーションを開始する直前に一度だけ呼ぶ。ウィンドウが「今まさに
+   描画している」フルサイズの見た目をそのままビットマップへコピーしておく
+   -- これが無いと、アニメーションで数px四方まで縮んだ後の内容がDWMの
+   タスクバーサムネイル/ライブプレビューになってしまう（実際に報告された
+   不具合）。GetDC+BitBlt方式を使う理由: PrintWindow/WM_PRINTはWM_PAINTのみで
+   自前描画するウィンドウでは何も描画されないことがある既知の癖があるが、
+   GetDCで取得した実際の画面上のDCから直接コピーすれば、今まさに表示されて
+   いる内容をそのまま確実に取得できる。 */
+static void CaptureIconicBitmap(GameWindowData *data)
+{
+    if (data->iconicBitmap)
+    {
+        DeleteObject(data->iconicBitmap);
+        data->iconicBitmap = NULL;
+    }
+
+    RECT rc;
+    GetClientRect(data->hwnd, &rc);
+    int w = rc.right - rc.left;
+    int h = rc.bottom - rc.top;
+    if (w <= 0 || h <= 0)
+        return;
+
+    HDC hdcWin = GetDC(data->hwnd);
+    HDC hdcMem = CreateCompatibleDC(hdcWin);
+    HBITMAP bmp = CreateArgbDibSection(hdcWin, w, h);
+    HBITMAP oldBmp = (HBITMAP)SelectObject(hdcMem, bmp);
+    BitBlt(hdcMem, 0, 0, w, h, hdcWin, 0, 0, SRCCOPY);
+    SelectObject(hdcMem, oldBmp);
+    DeleteDC(hdcMem);
+    ReleaseDC(data->hwnd, hdcWin);
+
+    data->iconicBitmap = bmp;
+}
+
+/* CaptureIconicBitmap/RespondIconicThumbnail/RespondIconicLivePreview共通:
+   キャプチャ済みビットマップを指定サイズへコピーした複製を作る。
+   DwmSetIconicThumbnail/DwmSetIconicLivePreviewBitmapへ渡すビットマップの
+   所有権はDWM側に移り、DWMが破棄する（MSDN仕様）ため、キャッシュ済みの
+   dataIconicBitmap自身を直接渡してはならず、呼び出しのたびに複製する。 */
+static HBITMAP CopyBitmapScaled(HBITMAP src, int srcW, int srcH, int dstW, int dstH)
+{
+    HDC screenDC = GetDC(NULL);
+    HDC srcDC = CreateCompatibleDC(screenDC);
+    HDC dstDC = CreateCompatibleDC(screenDC);
+    HBITMAP dstBmp = CreateArgbDibSection(screenDC, dstW, dstH);
+    ReleaseDC(NULL, screenDC);
+
+    HBITMAP oldSrc = (HBITMAP)SelectObject(srcDC, src);
+    HBITMAP oldDst = (HBITMAP)SelectObject(dstDC, dstBmp);
+    if (dstW == srcW && dstH == srcH)
+    {
+        BitBlt(dstDC, 0, 0, dstW, dstH, srcDC, 0, 0, SRCCOPY);
+    }
+    else
+    {
+        SetStretchBltMode(dstDC, HALFTONE);
+        StretchBlt(dstDC, 0, 0, dstW, dstH, srcDC, 0, 0, srcW, srcH, SRCCOPY);
+    }
+    SelectObject(srcDC, oldSrc);
+    SelectObject(dstDC, oldDst);
+    DeleteDC(srcDC);
+    DeleteDC(dstDC);
+    return dstBmp;
+}
+
+/* WM_DWMSENDICONICTHUMBNAIL応答: タスクバーボタンにマウスを乗せた時の
+   小さなサムネイル。lParamで要求された箱に収まるよう、アスペクト比を
+   保ったまま縮小する。 */
+static void RespondIconicThumbnail(GameWindowData *data, int reqW, int reqH)
+{
+    if (!data->iconicBitmap || reqW <= 0 || reqH <= 0)
+        return;
+
+    BITMAP bmInfo;
+    if (!GetObject(data->iconicBitmap, sizeof(bmInfo), &bmInfo) ||
+        bmInfo.bmWidth <= 0 || bmInfo.bmHeight <= 0)
+        return;
+
+    float scaleW = (float)reqW / (float)bmInfo.bmWidth;
+    float scaleH = (float)reqH / (float)bmInfo.bmHeight;
+    float scale = (scaleW < scaleH) ? scaleW : scaleH;
+    int dstW = (int)(bmInfo.bmWidth * scale);
+    int dstH = (int)(bmInfo.bmHeight * scale);
+    if (dstW < 1)
+        dstW = 1;
+    if (dstH < 1)
+        dstH = 1;
+
+    HBITMAP scaled = CopyBitmapScaled(data->iconicBitmap, bmInfo.bmWidth, bmInfo.bmHeight, dstW, dstH);
+    DwmSetIconicThumbnail(data->hwnd, scaled, 0);
+}
+
+/* WM_DWMSENDICONICLIVEPREVIEWBITMAP応答: タスクバーボタンをクリックした
+   時のAero Peekの大きなプレビュー。原寸大のキャプチャをそのまま渡す。 */
+static void RespondIconicLivePreview(GameWindowData *data)
+{
+    if (!data->iconicBitmap)
+        return;
+
+    BITMAP bmInfo;
+    if (!GetObject(data->iconicBitmap, sizeof(bmInfo), &bmInfo) ||
+        bmInfo.bmWidth <= 0 || bmInfo.bmHeight <= 0)
+        return;
+
+    HBITMAP copy = CopyBitmapScaled(data->iconicBitmap, bmInfo.bmWidth, bmInfo.bmHeight, bmInfo.bmWidth, bmInfo.bmHeight);
+    DwmSetIconicLivePreviewBitmap(data->hwnd, copy, NULL, 0);
+}
+
 static LRESULT CALLBACK GameWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     int index = FindWindowIndex(hwnd);
@@ -730,6 +860,14 @@ static LRESULT CALLBACK GameWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
         return 0;
     case WM_ERASEBKGND:
         return 1;
+    case WM_DWMSENDICONICTHUMBNAIL:
+        if (index >= 0)
+            RespondIconicThumbnail(&g_windows[index], LOWORD(lParam), HIWORD(lParam));
+        return 0;
+    case WM_DWMSENDICONICLIVEPREVIEWBITMAP:
+        if (index >= 0)
+            RespondIconicLivePreview(&g_windows[index]);
+        return 0;
     case WM_CLOSE:
         return 0;
     case WM_DESTROY:
@@ -1038,9 +1176,35 @@ void SetWindowMinimized(int index, int minimized)
     {
         if (data->minimized || data->minimizeAnimState != 0)
             return;
+
+        /* 縮小アニメーションで実際にウィンドウを小さくする前に、フルサイズの
+           見た目を1回だけキャプチャしてDWMへ渡す準備をする（RespondIconic*
+           参照）。DWMWA_FORCE_ICONIC_REPRESENTATIONを立てることで、以後
+           ウィンドウが最小化されている間はDWMが自動キャプチャを使わず
+           必ずWM_DWMSENDICONICTHUMBNAIL/WM_DWMSENDICONICLIVEPREVIEWBITMAPで
+           問い合わせてくるようになり、数px四方まで縮んだ後の内容が
+           タスクバーサムネイルに映ってしまう不具合を防げる。 */
+        CaptureIconicBitmap(data);
+        BOOL trueVal = TRUE;
+        DwmSetWindowAttribute(data->hwnd, DWMWA_HAS_ICONIC_BITMAP, &trueVal, sizeof(trueVal));
+        DwmSetWindowAttribute(data->hwnd, DWMWA_FORCE_ICONIC_REPRESENTATION, &trueVal, sizeof(trueVal));
+        /* 属性を立てただけではDWMが即座に問い合わせてくるとは限らない
+           （「更新中」のプレースホルダのまま止まって見えることがあった --
+           実際に報告された不具合）。明示的にDwmInvalidateIconicBitmapsを
+           呼び、WM_DWMSENDICONICTHUMBNAIL/WM_DWMSENDICONICLIVEPREVIEWBITMAPを
+           今すぐ問い合わせさせる。 */
+        DwmInvalidateIconicBitmaps(data->hwnd);
+
         GetWindowRect(data->hwnd, &data->minimizeAnimFrom);
         int cx = (data->minimizeAnimFrom.left + data->minimizeAnimFrom.right) / 2;
-        data->minimizeAnimTo = MinimizeAnimPointRect(cx, data->minimizeAnimFrom.bottom);
+        /* 収縮先をウィンドウ自身の下端ではなく画面（タスクバー）の下端にする
+           -- 自身の下端だと、画面の上の方にあるウィンドウほど本来のタスク
+           バーの位置とかけ離れた高さで収縮してしまい、見た目上左上寄りへ
+           消えていくように見えてしまう（実際に報告された不具合）。実際の
+           Windowsの最小化ジーニーと同じく、常に画面下端(タスクバー方向)へ
+           向かって縮んでいくようにする。 */
+        int screenBottom = GetSystemMetrics(SM_CYSCREEN);
+        data->minimizeAnimTo = MinimizeAnimPointRect(cx, screenBottom);
         data->minimizeAnimT = 0.0f;
         data->minimizeAnimState = 1;
     }
@@ -1050,10 +1214,25 @@ void SetWindowMinimized(int index, int minimized)
             return;
         Hierarchy_RestoreWindow(index);
 
+        /* 通常の描画に戻すため、強制アイコン表現を解除しキャプチャした
+           ビットマップを解放する（次に最小化される時にCaptureIconicBitmapで
+           改めて撮り直す）。 */
+        BOOL falseVal = FALSE;
+        DwmSetWindowAttribute(data->hwnd, DWMWA_FORCE_ICONIC_REPRESENTATION, &falseVal, sizeof(falseVal));
+        if (data->iconicBitmap)
+        {
+            DeleteObject(data->iconicBitmap);
+            data->iconicBitmap = NULL;
+        }
+
         RECT full;
         GetWindowRect(data->hwnd, &full);
         int cx = (full.left + full.right) / 2;
-        data->minimizeAnimFrom = MinimizeAnimPointRect(cx, full.bottom);
+        /* 収縮先を画面下端にした変更と対にする: 復元アニメーションも同じ
+           画面下端（タスクバー方向）から元のサイズへ向かって広がってくる
+           ように見せる。 */
+        int screenBottom = GetSystemMetrics(SM_CYSCREEN);
+        data->minimizeAnimFrom = MinimizeAnimPointRect(cx, screenBottom);
         data->minimizeAnimTo = full;
         SetWindowPos(data->hwnd, NULL, data->minimizeAnimFrom.left, data->minimizeAnimFrom.top,
                      data->minimizeAnimFrom.right - data->minimizeAnimFrom.left,
@@ -1135,4 +1314,12 @@ void DeleteWindow(int index)
     data->hwnd = NULL;
     ZOrder_Unregister(hwnd);
     DestroyWindow(hwnd);
+
+    /* 最小化中に削除された場合、CaptureIconicBitmapで確保したGDIビットマップが
+       残ったままになるのを防ぐ。 */
+    if (data->iconicBitmap)
+    {
+        DeleteObject(data->iconicBitmap);
+        data->iconicBitmap = NULL;
+    }
 }
