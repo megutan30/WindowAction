@@ -1277,11 +1277,23 @@ void MinimizeAnim_UpdateAll(float dt)
             if (wasMinimizing)
             {
                 /* 縮小アニメーションで動かした分を元のフルサイズへ戻してから
-                   実際にOS最小化する（上の関数コメント参照）。 */
+                   実際にOS最小化する（上の関数コメント参照）。SWP_NOREDRAWは
+                   GDIレベルの再描画要求を抑えるだけで、DWM側がウィンドウの
+                   実サーフェス自体を新しい位置・サイズへ即座に移動/伸縮する
+                   ことまでは止められず、それだけでは「タスクバー方向へほぼ
+                   縮みきった状態から、元のフルサイズ・元の位置へ一瞬だけ戻る」
+                   瞬間が依然として見えてしまっていた（実際にWin32 API計測で
+                   確認・報告された不具合）。確実に見せないようにするため、
+                   フルサイズへ戻す前に一旦SW_HIDEで非表示にしてから位置・
+                   サイズを更新する -- 非表示の状態で動かせば画面には一切
+                   反映されず、直後のShowWindow(SW_MINIMIZE)（非表示→最小化は
+                   どちらも「見えない」状態同士の遷移）でそのままタスクバーへ
+                   収まる。 */
+                ShowWindow(data->hwnd, SW_HIDE);
                 RECT full = data->minimizeAnimFrom;
                 SetWindowPos(data->hwnd, NULL, full.left, full.top,
                              full.right - full.left, full.bottom - full.top,
-                             SWP_NOZORDER | SWP_NOACTIVATE);
+                             SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
                 Hierarchy_MinimizeSubtree(i);
             }
         }
