@@ -464,30 +464,53 @@ static void DrawDeletableMark(HDC hdc, RECT rc, COLORREF color)
 
 static void DrawGoalMark(HDC hdc, RECT rc)
 {
-    /* Goal_Paintは baseFontSize = Math.Min(localRenderRect.Width,
-       localRenderRect.Height) を計算する。ここでlocalRenderRectは衝突ボックスの
-       RENDER_RATIO=1.5倍 -- 「G」のグリフはゴールの現在サイズに応じてスケールし、
-       固定ポイントサイズではない。ここで固定値40を使うとデフォルトの64x64では
-       問題なく見えるが、ゴールがリサイズされると明らかに一致しなくなる。 */
     int w = rc.right - rc.left;
     int h = rc.bottom - rc.top;
-    int fontHeight = (int)(((w < h) ? w : h) * 1.5f);
-    if (fontHeight < 8)
-        fontHeight = 8;
+    if (w <= 0 || h <= 0)
+        return;
 
-    SetBkMode(hdc, TRANSPARENT);
-    HFONT font = CreateFontA(fontHeight, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+    /* 以前はGoal_Paintと同じくbaseFontSize = min(w,h)*1.5の等方フォントで
+       描いていた（「G」の見た目は常に正方形に近いまま）。これは実際の当たり
+       判定(CheckGoalが見るGetWindowFullBounds、つまりrc全体)とは無関係に
+       常に正方形寄りの見た目になるため、Goalが親のリサイズで縦横比の異なる
+       形（横に潰れた/縦に伸びた矩形）になると、見た目のGはその中央に小さく
+       留まったままなのに、実際に触れて反応する範囲はrc全体（Gの見た目より
+       ずっと外側まで）という食い違いが生じ、プレイヤーが「Gに触れないと
+       届かない」と誤認してしまっていた（実際に報告された不具合）。
+       正方形の参照バッファに等方フォントで描いてからStretchBltでrc全体へ
+       引き伸ばすことで、見た目のGの外接矩形が常にrc（実際の判定範囲）と
+       正確に同じ縦横比になるようにする。 */
+    const int REF = 128;
+    HDC refDC = CreateCompatibleDC(hdc);
+    HBITMAP refBmp = CreateCompatibleBitmap(hdc, REF, REF);
+    HBITMAP oldRefBmp = (HBITMAP)SelectObject(refDC, refBmp);
+
+    RECT refRc = {0, 0, REF, REF};
+    HBRUSH magentaBrush = CreateSolidBrush(RGB(255, 0, 255));
+    FillRect(refDC, &refRc, magentaBrush);
+    DeleteObject(magentaBrush);
+
+    SetBkMode(refDC, TRANSPARENT);
+    HFONT font = CreateFontA((int)(REF * 1.5f), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
                               DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                               DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, "Arial");
-    HFONT old = (HFONT)SelectObject(hdc, font);
-    SetTextColor(hdc, RGB(40, 40, 40));
-    RECT shadow = rc;
-    OffsetRect(&shadow, 1, 1);
-    DrawTextA(hdc, "G", -1, &shadow, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    SetTextColor(hdc, RGB(255, 215, 0));
-    DrawTextA(hdc, "G", -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    SelectObject(hdc, old);
+    HFONT oldFont = (HFONT)SelectObject(refDC, font);
+    SetTextColor(refDC, RGB(40, 40, 40));
+    RECT shadow = refRc;
+    OffsetRect(&shadow, 2, 2);
+    DrawTextA(refDC, "G", -1, &shadow, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    SetTextColor(refDC, RGB(255, 215, 0));
+    DrawTextA(refDC, "G", -1, &refRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    SelectObject(refDC, oldFont);
     DeleteObject(font);
+
+    SetStretchBltMode(hdc, HALFTONE);
+    SetBrushOrgEx(hdc, rc.left, rc.top, NULL);
+    StretchBlt(hdc, rc.left, rc.top, w, h, refDC, 0, 0, REF, REF, SRCCOPY);
+
+    SelectObject(refDC, oldRefBmp);
+    DeleteObject(refBmp);
+    DeleteDC(refDC);
 }
 
 /* kindに対応するストラテジーマーク（あれば）を描画する。PaintGameWindowの
