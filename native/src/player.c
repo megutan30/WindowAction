@@ -464,6 +464,7 @@ HWND CreatePlayerWindow(HINSTANCE hInstance, Player *p, int startX, int startY)
     p->width = PLAYER_SIZE;
     p->height = PLAYER_SIZE;
     p->origSizeGen = 0;
+    p->lastAppliedParentIdx = -1;
     p->vy = 0.0f;
     p->grounded = 0;
     p->facingRight = 1;
@@ -538,6 +539,7 @@ void Player_Reset(Player *p, int startX, int startY)
     p->width = PLAYER_SIZE;
     p->height = PLAYER_SIZE;
     p->origSizeGen = 0;
+    p->lastAppliedParentIdx = -1;
     p->vy = 0.0f;
     p->grounded = 0;
     p->parentIdx = -1;
@@ -623,12 +625,21 @@ void Player_ApplyParentRelativeTransform(Player *p, int windowIndex, RECT newRec
        浮いても（下のブロックには到達せずここを素通りするだけなので）
        追従は止めない -- そうしないと、部屋の中で普通にジャンプしただけで
        リサイズ中の相対位置追従が効かなくなってしまう（別途報告された
-       不具合）。 */
-    if (p->origSizeGen != g_resizeGeneration)
+       不具合）。
+
+       g_resizeGenerationが変わらないままparentIdxだけが切り替わる場合
+       （リサイズ中の親ウィンドウとその子ウィンドウの間をプレイヤーが
+       行き来した場合）も同様に再確立が必要 -- lastAppliedParentIdxが
+       windowIndexと一致しない場合はlastAppliedParentRectが別のウィンドウの
+       矩形のままなので、origSizeGenの世代比較だけに頼ると前の親の矩形を
+       基準にした差分がそのまま新しい親の矩形へ誤って適用されてしまい、
+       位置・サイズが唐突に変化する不具合が起きる（実際に報告された不具合）。 */
+    if (p->origSizeGen != g_resizeGeneration || p->lastAppliedParentIdx != windowIndex)
     {
         if (!p->grounded)
             return;
         p->origSizeGen = g_resizeGeneration;
+        p->lastAppliedParentIdx = windowIndex;
         p->lastAppliedParentRect = newRect;
         return;
     }
@@ -746,6 +757,7 @@ void Player_MirrorWithinParent(Player *p, int windowIndex, RECT parentBounds, in
        ジャンプを「歩行による移動」と誤認して差分適用してしまわないよう、
        追従の基準もこの時点の親矩形に更新しておく。 */
     p->lastAppliedParentRect = parentBounds;
+    p->lastAppliedParentIdx = windowIndex;
 
     if (p->hwnd)
     {

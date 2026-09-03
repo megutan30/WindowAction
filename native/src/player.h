@@ -19,6 +19,15 @@ typedef struct {
        フレームごとの差分だけを積み重ねることで、歩行による移動と、いつ
        入ってきても連続的なリサイズ追従を両立させる。 */
     RECT lastAppliedParentRect;
+    /* lastAppliedParentRect がどのウィンドウ（インデックス）についての
+       ものかを記録する。リサイズ中の親ウィンドウとその子ウィンドウとの
+       間をプレイヤーが行き来すると、g_resizeGeneration は同じジェスチャー
+       のまま親だけが切り替わるため、origSizeGenの世代比較だけでは
+       「新しい親に対するベースラインをまだ確立していない」ことを検出
+       できず、前の親の矩形を基準にした差分計算が別のウィンドウの矩形へ
+       誤って適用され、位置・サイズが唐突に変化する不具合が起きる
+       （Player_ApplyParentRelativeTransform参照）。 */
+    int lastAppliedParentIdx;
     float vy;
     int grounded;
     int facingRight;
