@@ -1142,7 +1142,21 @@ static void HandleWindowTransitions(Player *p, RECT newBounds)
     {
         int covering = WindowQuery_GetFullyContaining(newBounds);
         if (covering >= 0)
+        {
             p->parentIdx = covering;
+            /* Player_ApplyParentRelativeTransformが使うlastAppliedParentIdx/
+               lastAppliedParentRectは「今の親に連続して居続けている間だけ」
+               有効な基準 -- 親が変わった（今回のように新しく入った）瞬間に
+               無効化しておかないと、以前に別の場所へ移動する前に一度その
+               ウィンドウの中で基準を確立したことがある場合、今度そこへ
+               戻ってきた時に「既に確立済み」と誤認してしまう。その間その
+               ウィンドウはプレイヤー不在のままリサイズされ続けていることが
+               あるため、古い（ズレた）基準にいきなり現在のスケールを
+               適用してしまい、サイズが一気にジャンプする不具合があった
+               （実際に報告された不具合: 他のウィンドウからリサイズ中の
+               ウィンドウに入ると急激に大きさが変わる）。 */
+            p->lastAppliedParentIdx = -1;
+        }
     }
     else
     {
@@ -1161,9 +1175,15 @@ static void HandleWindowTransitions(Player *p, RECT newBounds)
 
         int newWin = WindowQuery_GetTopWindowAt(newBounds, p->parentIdx);
         if (newWin >= 0 && newWin != p->parentIdx)
+        {
             p->parentIdx = newWin;
+            p->lastAppliedParentIdx = -1; /* 上と同じ理由: 親が切り替わったので基準を無効化 */
+        }
         else if (newWin < 0)
+        {
             p->parentIdx = -1;
+            p->lastAppliedParentIdx = -1;
+        }
     }
 }
 
@@ -1736,6 +1756,7 @@ void Player_OnMinimize(Player *p)
     p->isMinimized = 1;
     p->lastValidParentIdx = p->parentIdx;
     p->parentIdx = -1;
+    p->lastAppliedParentIdx = -1; /* HandleWindowTransitionsと同じ理由: 親が変わるので基準を無効化 */
 
     /* PlayerForm.OnMinimizeはWindowState = FormWindowState.Minimizedを
        設定する -- 内部フラグだけではなく、実際のWin32の最小化（非表示になり
@@ -1778,6 +1799,7 @@ void Player_OnRestore(Player *p)
 {
     p->isMinimized = 0;
     p->minimizeAnimState = 0;
+    p->lastAppliedParentIdx = -1; /* HandleWindowTransitionsと同じ理由: 親が変わるので基準を無効化 */
 
     if (p->hwnd)
     {
