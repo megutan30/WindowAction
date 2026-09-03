@@ -188,6 +188,36 @@ int FindGoalIndex(void)
     return -1;
 }
 
+/* Goal_UpdateParent/Button_UpdateParent専用: 現在の親（あれば）が、辺が
+   接している場合も内包とみなす緩い基準でまだboundsを内包しているかを返す。
+   WindowQuery_FullyContainsは辺が接しているだけでは内包とみなさない厳密な
+   不等号を使う -- これはユーザーが自由にドラッグしている最中の境界での
+   ジッター防止には必要だが、Hierarchy_ApplyRelativeTransformによる
+   スケール追従は、親自身が同じminSize/maxSizeで頭打ちになっている状況で
+   Goal/ボタンを親の境界ぴったりまでクランプすることがある（親も子も
+   同じ下限で縮み切った場合など）。この「ぴったり」を毎フレームその厳密な
+   基準で再評価すると、追従で正しく親の内側に収めているにもかかわらず
+   「もう内包されていない」と誤判定して親子関係を解除し続けてしまい、
+   以降Hierarchy_ApplyRelativeTransform側の追従対象からも外れてサイズ・
+   位置がその場で凍結し、親だけがさらに縮んで最終的にGoal/ボタンが
+   はみ出て見える不具合があった（実際に報告された不具合: 制限なしリサイズ
+   ウィンドウの子のとき、プレイヤーやウィンドウと違って途中で縮まなくなる）。
+   現在の親がまだ（辺の接触を許容して）内包しているならそれを優先し、
+   本当にはみ出した場合にのみWindowQuery_GetFullyContainingへフォールバック
+   する。 */
+static int IsStillInclusivelyContainedByCurrentParent(int parentIdx, RECT bounds)
+{
+    if (parentIdx < 0)
+        return 0;
+    GameWindowData *parent = GetWindowData(parentIdx);
+    if (!parent || !parent->hwnd || parent->minimized)
+        return 0;
+    RECT pb;
+    GetWindowFullBounds(parent->hwnd, &pb);
+    return bounds.left >= pb.left && bounds.top >= pb.top &&
+           bounds.right <= pb.right && bounds.bottom <= pb.bottom;
+}
+
 void Goal_UpdateParent(void)
 {
     int goalIdx = FindGoalIndex();
@@ -199,6 +229,10 @@ void Goal_UpdateParent(void)
 
     RECT gb;
     GetWindowFullBounds(goal->hwnd, &gb);
+
+    if (IsStillInclusivelyContainedByCurrentParent(goal->parentIdx, gb))
+        return;
+
     int newParent = WindowQuery_GetFullyContaining(gb);
     if (newParent == goal->parentIdx)
         return;
@@ -229,6 +263,10 @@ void Button_UpdateParent(void)
 
         RECT bb;
         GetWindowFullBounds(btn->hwnd, &bb);
+
+        if (IsStillInclusivelyContainedByCurrentParent(btn->parentIdx, bb))
+            continue;
+
         int newParent = WindowQuery_GetFullyContaining(bb);
         if (newParent == btn->parentIdx)
             continue;

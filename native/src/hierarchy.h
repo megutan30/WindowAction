@@ -25,9 +25,9 @@ void Hierarchy_RecordOriginalSizes(int rootIndex);
    アンカー基準の反転で左上そのものが動く/反転しうる）の両方から使う共通
    実装。`minSize`/`maxSize`は子の拡大縮小に課す下限/上限で、呼び出し元が
    自分の種別に応じたものを渡す（通常のResizableはMIN_WINDOW_SIZE、制限
-   なしリサイズはより小さいUNCONSTRAINED_MIN_ABS_SIZE）。Player/Goal/ボタン
-   は「サイズのみ変更、位置固定」のまま扱う（内部でApplyScaleToSpecialChildren
-   相当を呼ぶ）。 */
+   なしリサイズはより小さいUNCONSTRAINED_MIN_ABS_SIZE）。Player/Goal/ボタンも
+   内部で呼ぶApplyScaleToSpecialChildren相当により、通常の子ウィンドウと
+   同じく相対位置・相対サイズを保ったまま追従する。 */
 void Hierarchy_ApplyRelativeTransform(int rootIndex, RECT oldRect, RECT newRect, int minSize, int maxSize);
 
 /* `rootIndex`が今まさに反転イベントを起こした瞬間に一度だけ呼ぶ。その時点の
