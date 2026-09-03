@@ -31,11 +31,25 @@ int g_requestTest = 0;
 #define EDITOR_BTN_W 150
 #define EDITOR_BTN_H 40
 
+/* 配置待ち（半透明の仮状態）アイテムの右下角にある、大きさ調整用の当たり
+   判定領域の一辺の長さ。見た目上のハンドル表示は行わず、座標判定のみ。 */
+#define PENDING_RESIZE_HANDLE 24
+/* 配置待ちアイテムの角ドラッグでの最小サイズ。実配置後のMIN_WINDOW_SIZE
+   （100）とは無関係 -- Goal(64x64)やRetryボタン(150x40)のような、実配置後の
+   通常ウィンドウより小さい既定サイズを持つ種別も自由に縮小できるようにする
+   ため、単に矩形が潰れない程度の小さな値にとどめる。 */
+#define PENDING_MIN_SIZE 20
+
 static int g_isTestStage = 0;
 static HINSTANCE g_hInstance = NULL;
 /* パレット+ツールバー全体を囲む矩形（Editor_LoadTestStageで一度だけ計算）。
    ドロップ判定（この外に離されたら実際に配置する）に使う。 */
 static RECT g_panelBounds;
+/* ドロップ済み・大きさ調整済みで、Enterキーによる確定を待っている
+   g_windows[]のインデックス。無ければ-1。同時に配置待ちにできるのは
+   1つだけ（Editor_StartPaletteDrag参照: 新しいドラッグを始めると自動的に
+   確定される）。 */
+static int g_pendingIndex = -1;
 
 typedef struct
 {
@@ -78,6 +92,9 @@ int Editor_IsTestStage(void) { return g_isTestStage; }
 void Editor_LoadTestStage(HINSTANCE hInstance)
 {
     ResetWindowRegistry();
+    /* ResetWindowRegistryがg_windows[]を全て破棄する（g_windowCount=0）ため、
+       直前の配置待ちインデックスは必ず無効になる。 */
+    g_pendingIndex = -1;
     g_isTestStage = 1;
     g_hInstance = hInstance;
 
@@ -163,22 +180,149 @@ static SIZE DragFullSize(WindowKind kind)
     return (SIZE){EDITOR_DEFAULT_SIZE, EDITOR_DEFAULT_SIZE};
 }
 
+/* ドロップ時に生成するウィンドウの初期表示テキスト。TextDisplay等ほとんどの
+   種別はNULL（kind別の既定文字列に任せる）のままだが、Title/Retryボタンは
+   実際のステージ(stage.cのMakeButton呼び出し)と同じキャプションが最初から
+   付いていないと、ボタンとして何のためのものか一見して分からない。 */
+static const char *DefaultDropText(WindowKind kind)
+{
+    switch (kind)
+    {
+    case WT_BTN_TOTITLE: return "Title";
+    case WT_BTN_RETRY: return "Retry";
+    default: return NULL;
+    }
+}
+
+/* 配置待ち(g_pendingIndex)のアイテムを、その時点の位置・大きさで確定する。
+   半透明のパレットアイコン(WT_BTN_PALETTE)自身を、実際の種別のGameWindow
+   （またはNoEntry Zone）に「実体化」させる -- 既存のCreateGameWindowIndexed/
+   NoEntry_AddZoneをそのまま使うため、パレットアイコンは一旦DeleteWindowで
+   破棄し、確定後の実サイズで新規に生成し直す（在席中のkindを直接書き換える
+   方式だと、生成時にkind別に固定されるexStyle/WS_EX_TOOLWINDOW等を実行時に
+   安全に付け替える手段がなく、タスクバー表示等が不安定になるため避けた）。
+   配置待ちが無ければ何もしない。 */
+static void Editor_CommitPending(void)
+{
+    if (g_pendingIndex < 0)
+        return;
+    GameWindowData *d = GetWindowData(g_pendingIndex);
+    int committedIndex = g_pendingIndex;
+    g_pendingIndex = -1;
+    if (!d || !d->hwnd)
+        return;
+
+    ReleaseCapture();
+    d->pendingGesture = 0;
+
+    RECT r;
+    GetWindowRect(d->hwnd, &r);
+    int x = r.left, y = r.top;
+    int w = r.right - r.left, h = r.bottom - r.top;
+    int isZone = d->paletteIsZone;
+    WindowKind kind = d->paletteKind;
+
+    DeleteWindow(committedIndex);
+
+    if (isZone)
+    {
+        /* 静的NoEntryZoneはGameWindowではないため、CreateGameWindowIndexed
+           ではなくNoEntry_AddZoneで直接追加する（クリックスルーの縞模様
+           マーカーが生成される。実ゲームプレイでの静的不可侵領域と全く
+           同じ仕組み）。 */
+        NoEntry_AddZone(g_hInstance, x, y, w, h);
+    }
+    else
+    {
+        int newIdx = CreateGameWindowIndexed(g_hInstance, kind, x, y, w, h, DefaultDropText(kind));
+        /* WindowMessageHandler.HandleLeftButtonUpと同じく、配置直後に一度だけ
+           親子判定を行う -- そうしないとドラッグ&ドロップで置いたウィンドウは
+           他のウィンドウの中に完全に収まっていても親子付けされず、その場で
+           少し動かす（ナッジドラッグ）まで親子関係が確立しなかった
+           （実際に報告された不具合）。 */
+        if (newIdx >= 0 && IsQueryableWindow(kind))
+            Hierarchy_CheckAndUpdate(newIdx);
+    }
+}
+
 void Editor_StartPaletteDrag(int index)
 {
     GameWindowData *d = GetWindowData(index);
     if (!d)
         return;
+
+    if (index == g_pendingIndex)
+    {
+        /* 既に位置が決まっている配置待ち(半透明)アイテム -- 右下角の
+           ハンドル領域内でのクリックは大きさ調整、それ以外の場所への
+           クリックは位置移動のジェスチャーを開始する。Enterキーで確定する
+           までは、どちらも何度でも自由にやり直せる。 */
+        RECT r;
+        GetWindowRect(d->hwnd, &r);
+        POINT cur;
+        GetCursorPos(&cur);
+        int inCorner = cur.x >= r.right - PENDING_RESIZE_HANDLE && cur.x <= r.right &&
+                        cur.y >= r.bottom - PENDING_RESIZE_HANDLE && cur.y <= r.bottom;
+
+        d->pendingGesture = inCorner ? 2 : 1;
+        d->pendingGestureStart = cur;
+        d->pendingGestureOrigRect = r;
+        SetCapture(d->hwnd);
+        return;
+    }
+
+    /* 既に別のアイテムが配置待ちの状態で新しいアイコンのドラッグを始めた
+       場合、前のものを宙ぶらりんにせず自動的にその時点の大きさで確定する。 */
+    if (g_pendingIndex >= 0)
+        Editor_CommitPending();
+
     d->paletteDragging = 1;
     SetCapture(d->hwnd);
 
     /* ドラッグ中は「配置されるものそのもの」を実サイズで半透明表示する
-       （小さなボタンのままカーソルに追従するのではなく）。 */
+       （小さなボタンのままカーソルに追従するのではなく）。この時点での
+       サイズはあくまで既定値 -- ドロップ後、角ドラッグで自由に調整できる。 */
     SIZE size = DragFullSize(d->paletteKind);
     POINT cur;
     GetCursorPos(&cur);
     SetWindowPos(d->hwnd, NULL, cur.x - size.cx / 2, cur.y - size.cy / 2, size.cx, size.cy,
                  SWP_NOZORDER | SWP_NOACTIVATE);
     SetLayeredWindowAttributes(d->hwnd, 0, PALETTE_DRAG_ALPHA, LWA_ALPHA);
+}
+
+/* 配置待ちアイテムの位置移動/大きさ調整ジェスチャーを1フレーム分進める。
+   Strategy.cのUpdateMovable/UpdateResizableは流用しない -- あちらはMIN_
+   WINDOW_SIZE(100)やNoEntry衝突回避、階層更新など実ゲームプレイの戦略に
+   合わせた制約を持ち、Goal(64x64)やRetryボタン(150x40)のような小さい既定
+   サイズの種別には厳しすぎる。ここでは単純にジェスチャー開始時点からの
+   カーソル移動量をそのまま位置/サイズへ適用するだけの軽量な実装にとどめる。 */
+static void UpdatePendingGesture(GameWindowData *d)
+{
+    if (d->pendingGesture == 0)
+        return;
+
+    POINT cur;
+    GetCursorPos(&cur);
+    int dx = cur.x - d->pendingGestureStart.x;
+    int dy = cur.y - d->pendingGestureStart.y;
+
+    if (d->pendingGesture == 2) /* 右下角ドラッグ: 左上を固定して大きさを追従 */
+    {
+        int newW = (d->pendingGestureOrigRect.right - d->pendingGestureOrigRect.left) + dx;
+        int newH = (d->pendingGestureOrigRect.bottom - d->pendingGestureOrigRect.top) + dy;
+        if (newW < PENDING_MIN_SIZE)
+            newW = PENDING_MIN_SIZE;
+        if (newH < PENDING_MIN_SIZE)
+            newH = PENDING_MIN_SIZE;
+        SetWindowPos(d->hwnd, NULL, 0, 0, newW, newH, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    else /* 本体ドラッグ: 位置移動 */
+    {
+        int newX = d->pendingGestureOrigRect.left + dx;
+        int newY = d->pendingGestureOrigRect.top + dy;
+        SetWindowPos(d->hwnd, NULL, newX, newY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    InvalidateRect(d->hwnd, NULL, FALSE);
 }
 
 void Editor_UpdatePaletteDrags(void)
@@ -194,64 +338,54 @@ void Editor_UpdatePaletteDrags(void)
         SetWindowPos(d->hwnd, NULL, cur.x - size.cx / 2, cur.y - size.cy / 2, 0, 0,
                      SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
-}
 
-/* ドロップ時に生成するウィンドウの初期表示テキスト。TextDisplay等ほとんどの
-   種別はNULL（kind別の既定文字列に任せる）のままだが、Title/Retryボタンは
-   実際のステージ(stage.cのMakeButton呼び出し)と同じキャプションが最初から
-   付いていないと、ボタンとして何のためのものか一見して分からない。 */
-static const char *DefaultDropText(WindowKind kind)
-{
-    switch (kind)
+    if (g_pendingIndex >= 0)
     {
-    case WT_BTN_TOTITLE: return "Title";
-    case WT_BTN_RETRY: return "Retry";
-    default: return NULL;
+        GameWindowData *d = GetWindowData(g_pendingIndex);
+        if (d)
+            UpdatePendingGesture(d);
     }
 }
 
 void Editor_EndPaletteDrag(int index)
 {
     GameWindowData *d = GetWindowData(index);
-    if (!d || !d->paletteDragging)
+    if (!d)
+        return;
+
+    if (d->pendingGesture != 0)
+    {
+        /* 配置待ちアイテムの位置移動/大きさ調整ジェスチャー終了。キャプチャ
+           解放+フラグクリアのみ行い、まだ確定（Enterキー）はしない --
+           半透明のまま、新しい位置/大きさで残る。 */
+        ReleaseCapture();
+        d->pendingGesture = 0;
+        return;
+    }
+
+    if (!d->paletteDragging)
         return;
     d->paletteDragging = 0;
     ReleaseCapture();
 
-    /* パレット+ツールバーの矩形の外に離されていれば、実際にそこへ配置する。
-       中で離された場合（ドラッグせず単に離した等）は何も配置しない。 */
+    /* パレット+ツールバーの矩形の外に離されていれば、位置はそこに確定する。
+       中で離された場合（ドラッグせず単に離した等）は配置キャンセル。 */
     POINT cur;
     GetCursorPos(&cur);
     int outside = cur.x < g_panelBounds.left || cur.x > g_panelBounds.right ||
                   cur.y < g_panelBounds.top || cur.y > g_panelBounds.bottom;
     if (outside)
     {
-        SIZE size = DragFullSize(d->paletteKind);
-        if (d->paletteIsZone)
-        {
-            /* 静的NoEntryZoneはGameWindowではないため、CreateGameWindowIndexed
-               ではなくNoEntry_AddZoneで直接追加する（クリックスルーの縞模様
-               マーカーが生成される。実ゲームプレイでの静的不可侵領域と全く
-               同じ仕組み）。 */
-            NoEntry_AddZone(g_hInstance, cur.x - size.cx / 2, cur.y - size.cy / 2, size.cx, size.cy);
-        }
-        else
-        {
-            WindowKind kind = d->paletteKind;
-            int newIdx = CreateGameWindowIndexed(g_hInstance, kind, cur.x - size.cx / 2, cur.y - size.cy / 2,
-                                                  size.cx, size.cy, DefaultDropText(kind));
-            /* WindowMessageHandler.HandleLeftButtonUpと同じく、配置直後に一度だけ
-               親子判定を行う -- そうしないとドラッグ&ドロップで置いたウィンドウは
-               他のウィンドウの中に完全に収まっていても親子付けされず、その場で
-               少し動かす（ナッジドラッグ）まで親子関係が確立しなかった
-               （実際に報告された不具合）。 */
-            if (newIdx >= 0 && IsQueryableWindow(kind))
-                Hierarchy_CheckAndUpdate(newIdx);
-        }
+        /* まだ実体化はしない -- 角のハンドルで大きさを調整してからEnterキーで
+           確定する「配置待ち」の半透明状態に移行するだけ（Editor_CommitPending/
+           Editor_HandlePendingCommit参照）。アイコン自身（同じhwnd）はここに
+           留まり続けるため、ホームポジションへは戻さない。 */
+        g_pendingIndex = index;
+        return;
     }
 
-    /* アイコン自身は常に元のサイズ・不透明度・ホームポジションへ戻す
-       （配置有無に関わらず）。 */
+    /* パレット内でキャンセルされた場合のみ、アイコンを元のサイズ・不透明度・
+       ホームポジションへ戻す。 */
     SetLayeredWindowAttributes(d->hwnd, 0, 255, LWA_ALPHA);
     SetWindowPos(d->hwnd, NULL, d->paletteHomePos.x, d->paletteHomePos.y,
                  d->paletteIconSize.cx, d->paletteIconSize.cy, SWP_NOZORDER | SWP_NOACTIVATE);
@@ -376,6 +510,21 @@ void Editor_HandleDeleteInput(void)
                 DeleteWindow(index);
         }
     }
+    wasDown = isDown;
+}
+
+void Editor_HandlePendingCommit(void)
+{
+    if (!g_isTestStage)
+        return;
+
+    /* Deleteキーと同じくエッジ検出: 押しっぱなしで連続確定してしまわない
+       ようにする（もっとも、確定後はg_pendingIndexが-1になるため実害は
+       無いが、他のエッジ検出処理と挙動を揃えておく）。 */
+    static int wasDown = 0;
+    int isDown = (GetAsyncKeyState(VK_RETURN) & 0x8000) != 0;
+    if (isDown && !wasDown && g_pendingIndex >= 0)
+        Editor_CommitPending();
     wasDown = isDown;
 }
 

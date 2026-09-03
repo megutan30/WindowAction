@@ -47,6 +47,13 @@ void Editor_ExportStage(void);
    種別を問わない）を1つ削除する。毎フレーム1回呼び出すこと。 */
 void Editor_HandleDeleteInput(void);
 
+/* テストステージ中のみ有効: パレットからドラッグ&ドロップして位置を決めた
+   直後の「配置待ち」アイテム（半透明、右下角のドラッグで大きさ調整可能、
+   Editor_EndPaletteDrag参照）がある状態でEnterキーが押された瞬間、その
+   時点の位置・大きさで実際に配置を確定する。配置待りが無ければ何もしない。
+   毎フレーム1回呼び出すこと。 */
+void Editor_HandlePendingCommit(void);
+
 #endif /* ENABLE_STAGE_EDITOR */
 
 #endif

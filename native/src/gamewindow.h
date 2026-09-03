@@ -160,6 +160,18 @@ typedef struct {
     SIZE paletteIconSize;
     int paletteDragging;
 
+    /* 配置待ち（ドロップ済み・半透明・Enterキー確定待ち）アイテムのマウス
+       操作状態専用。0=無し、1=位置移動中（本体ドラッグ）、2=大きさ調整中
+       （右下角ドラッグ）。実ゲームプレイのdragging/resizingフィールドとは
+       意図的に分離している -- Strategy_UpdateAllはkindに関わらずdragging/
+       resizingを毎フレーム見て自動的にUpdateMovable/UpdateResizableを
+       呼んでしまうため、それらを流用すると実配置用の衝突判定・最小
+       サイズ制約(MIN_WINDOW_SIZE)・階層更新が、まだ実体化していない仮
+       アイテムにまで二重に適用されてしまう（Editor_StartPaletteDrag等参照）。 */
+    int pendingGesture;
+    POINT pendingGestureStart;   /* ジェスチャー開始時のカーソル位置（スクリーン座標） */
+    RECT pendingGestureOrigRect; /* ジェスチャー開始時のウィンドウ矩形 */
+
     /* このウィンドウがエディター自身のUI要素（パレットアイコン/ツールバー
        ボタン）であり、ユーザーが「配置した」ものではないことを示す。
        WT_BTN_TOTITLE等、実ゲームプレイでも使う種別をツールバーの固定

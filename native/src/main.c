@@ -187,6 +187,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 #ifdef ENABLE_STAGE_EDITOR
         Editor_UpdatePaletteDrags();
         Editor_HandleDeleteInput();
+        Editor_HandlePendingCommit();
 #endif
         InvalidateLiveWindows();
         ZOrder_ReassertOverlayFront(g_player.hwnd);
