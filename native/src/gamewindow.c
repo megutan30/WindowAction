@@ -1320,6 +1320,13 @@ void MinimizeAnim_UpdateAll(float dt)
         int h = LerpInt(from.bottom - from.top, to.bottom - to.top, t);
         SetWindowPos(data->hwnd, NULL, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
         InvalidateRect(data->hwnd, NULL, FALSE);
+        /* InvalidateRectだけでは再描画が次のメッセージループパスまで遅延され、
+           特に復元(拡大)アニメーション中は、その1フレーム分の隙間で新しく
+           露出した領域が未初期化の黒いままになって見えてしまう（実際に
+           報告された不具合: 復元時に黒い部分が映る）。他の拡大処理
+           （Hierarchy_ApplyRelativeTransform等）と同じくUpdateWindowで
+           同期的に再描画を強制する。 */
+        UpdateWindow(data->hwnd);
 
         if (data->minimizeAnimT >= 1.0f)
         {

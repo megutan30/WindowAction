@@ -1710,6 +1710,10 @@ void Player_UpdateMinimizeAnim(Player *p, float dt)
     int h = PlayerLerpInt(from.bottom - from.top, to.bottom - to.top, t);
     SetWindowPos(p->hwnd, NULL, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
     InvalidateRect(p->hwnd, NULL, FALSE);
+    /* InvalidateRectだけでは再描画が次のメッセージループパスまで遅延され、
+       新しく露出した領域が未初期化の黒いままになって見えてしまうことが
+       ある（GameWindow.cのMinimizeAnim_UpdateAllと同じ理由）。 */
+    UpdateWindow(p->hwnd);
 
     if (p->minimizeAnimT >= 1.0f)
         p->minimizeAnimState = 0;
@@ -1732,9 +1736,30 @@ void Player_OnMinimize(Player *p)
        移動キー（方向キー相当）を押すとWindows標準のアイコンナビゲーション
        処理が働いて警告音が鳴ってしまう（実際に報告された不具合）。
        SW_MINIMIZEはアクティブ化せずZオーダー上の次のウィンドウへ
-       フォーカスを譲るため、この副作用が起きない。 */
+       フォーカスを譲るため、この副作用が起きない。
+
+       この時点でウィンドウの実際のサイズは、直前のPlayer_UpdateMinimizeAnim
+       で縮小しきった小さいサイズになっている。そのままSW_MINIMIZEすると、
+       WindowsのWINDOWPLACEMENTにその小さいサイズが「復元先」として記憶
+       されてしまい、後でPlayer_OnRestoreでSW_RESTOREした際に一旦その
+       小さいサイズで復元されてから、次のPlayer_Updateで正しいフルサイズへ
+       一気にジャンプすることになり、その際に新しく露出した領域が未初期化の
+       黒いままになって見えてしまう（実際に報告された不具合、GameWindow.cの
+       SetWindowMinimizedで既に修正済みのものと同じ原因）。
+       SW_HIDEで一旦非表示にしてから正しいフルサイズ（GetPlayerDisplayRect）
+       へ位置・サイズを更新し、それからSW_MINIMIZEすることで、
+       WINDOWPLACEMENTには常に正しいフルサイズが記録されるようにする。
+       SWP_NOREDRAWだけでは不十分（DWMがGDIの再描画抑制とは無関係に実際の
+       合成サーフェスを移動/リサイズしてしまう）なため、SW_HIDEによる
+       非表示化が必須。 */
     if (p->hwnd)
+    {
+        ShowWindow(p->hwnd, SW_HIDE);
+        int dx, dy, dw, dh;
+        GetPlayerDisplayRect(p, &dx, &dy, &dw, &dh);
+        SetWindowPos(p->hwnd, NULL, dx, dy, dw, dh, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
         ShowWindow(p->hwnd, SW_MINIMIZE);
+    }
 }
 
 void Player_OnRestore(Player *p)
