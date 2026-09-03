@@ -180,6 +180,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         HandleDeletableInput();
         NoEntry_UpdateAnimation((float)dt);
         MinimizeAnim_UpdateAll((float)dt);
+        /* isMinimizedの値に関わらず(Player_Update内のガードとは別経路で)
+           毎フレーム進める必要がある -- でなければ縮小アニメーションの途中
+           フレームが一切適用されない。 */
+        Player_UpdateMinimizeAnim(&g_player, (float)dt);
 #ifdef ENABLE_STAGE_EDITOR
         Editor_UpdatePaletteDrags();
         Editor_HandleDeleteInput();

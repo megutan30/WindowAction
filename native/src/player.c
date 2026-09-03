@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <limits.h>
 #include <float.h>
+#include <dwmapi.h>
 
 #define MOVE_SPEED 400.0f
 #define GRAVITY 2600.0f
@@ -204,6 +205,179 @@ static void PaintPlayer(HWND hwnd)
     EndPaint(hwnd, &ps);
 }
 
+/* GameWindow.cのCreateArgbDibSectionと同じ: DwmSetIconicThumbnail/
+   DwmSetIconicLivePreviewBitmapに渡すビットマップは32bpp・トップダウンの
+   DIBセクションである必要がある。 */
+static HBITMAP CreatePlayerArgbDibSection(HDC referenceDC, int w, int h, void **outBits)
+{
+    BITMAPINFO bmi;
+    ZeroMemory(&bmi, sizeof(bmi));
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = w;
+    bmi.bmiHeader.biHeight = -h; /* トップダウン(上から下)で格納する */
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    return CreateDIBSection(referenceDC, &bmi, DIB_RGB_COLORS, outBits, NULL, 0);
+}
+
+/* 縮小アニメーションを開始する直前に一度だけ呼ぶ（GameWindow.cの
+   CaptureIconicBitmapと同じ理由: これが無いと、アニメーションで数px四方まで
+   縮んだ後の内容がDWMのタスクバーサムネイル/ライブプレビューになって
+   しまう）。PaintPlayerは背景をマゼンタのカラーキーで塗ってから本体を
+   描画しているため、GetDC+BitBltでそのまま取り込むと背景がマゼンタの
+   不透明なブロックとしてサムネイルに映ってしまう -- BitBltはアルファ
+   チャンネルを一切書き換えないため、取り込んだ後にマゼンタの画素だけ
+   アルファ0(透明)、それ以外をアルファ255(不透明)に手動で置き換えることで、
+   プレイヤー本体だけが正しく切り抜かれたサムネイルになる。 */
+static void CapturePlayerIconicBitmap(Player *p)
+{
+    if (p->iconicBitmap)
+    {
+        DeleteObject(p->iconicBitmap);
+        p->iconicBitmap = NULL;
+    }
+
+    RECT rc;
+    GetClientRect(p->hwnd, &rc);
+    int w = rc.right - rc.left;
+    int h = rc.bottom - rc.top;
+    if (w <= 0 || h <= 0)
+        return;
+
+    HDC hdcWin = GetDC(p->hwnd);
+    HDC hdcMem = CreateCompatibleDC(hdcWin);
+    void *bits = NULL;
+    HBITMAP bmp = CreatePlayerArgbDibSection(hdcWin, w, h, &bits);
+    if (!bmp || !bits)
+    {
+        if (bmp)
+            DeleteObject(bmp);
+        DeleteDC(hdcMem);
+        ReleaseDC(p->hwnd, hdcWin);
+        return;
+    }
+    HBITMAP oldBmp = (HBITMAP)SelectObject(hdcMem, bmp);
+    BitBlt(hdcMem, 0, 0, w, h, hdcWin, 0, 0, SRCCOPY);
+    SelectObject(hdcMem, oldBmp);
+    DeleteDC(hdcMem);
+    ReleaseDC(p->hwnd, hdcWin);
+
+    unsigned char *px = (unsigned char *)bits;
+    for (int i = 0; i < w * h; i++)
+    {
+        unsigned char b = px[i * 4 + 0];
+        unsigned char g = px[i * 4 + 1];
+        unsigned char r = px[i * 4 + 2];
+        int isMagenta = (r == 255 && g == 0 && b == 255);
+        px[i * 4 + 3] = (unsigned char)(isMagenta ? 0 : 255);
+    }
+
+    p->iconicBitmap = bmp;
+}
+
+/* CapturePlayerIconicBitmap/RespondPlayerIconicThumbnail/
+   RespondPlayerIconicLivePreview共通: キャプチャ済みビットマップを指定
+   サイズへコピーした複製を作る。DwmSetIconicThumbnail/
+   DwmSetIconicLivePreviewBitmapへ渡すビットマップの所有権はDWM側に移り、
+   DWMが破棄する（MSDN仕様）ため、キャッシュ済みのp->iconicBitmap自身を
+   直接渡してはならず、呼び出しのたびに複製する。 */
+static HBITMAP CopyPlayerBitmapScaled(HBITMAP src, int srcW, int srcH, int dstW, int dstH)
+{
+    HDC screenDC = GetDC(NULL);
+    HDC srcDC = CreateCompatibleDC(screenDC);
+    HDC dstDC = CreateCompatibleDC(screenDC);
+    void *bits = NULL;
+    HBITMAP dstBmp = CreatePlayerArgbDibSection(screenDC, dstW, dstH, &bits);
+    ReleaseDC(NULL, screenDC);
+    if (!dstBmp)
+    {
+        DeleteDC(srcDC);
+        DeleteDC(dstDC);
+        return NULL;
+    }
+
+    HBITMAP oldSrc = (HBITMAP)SelectObject(srcDC, src);
+    HBITMAP oldDst = (HBITMAP)SelectObject(dstDC, dstBmp);
+    if (dstW == srcW && dstH == srcH)
+    {
+        BitBlt(dstDC, 0, 0, dstW, dstH, srcDC, 0, 0, SRCCOPY);
+    }
+    else
+    {
+        SetStretchBltMode(dstDC, HALFTONE);
+        StretchBlt(dstDC, 0, 0, dstW, dstH, srcDC, 0, 0, srcW, srcH, SRCCOPY);
+    }
+    SelectObject(srcDC, oldSrc);
+    SelectObject(dstDC, oldDst);
+    DeleteDC(srcDC);
+    DeleteDC(dstDC);
+
+    /* 通常のBitBlt/StretchBltはアルファチャンネルの意味を理解せず、拡縮の
+       過程でアルファ値を保持しない（0にリセットされたり不定値になったり
+       する）ことがある。CapturePlayerIconicBitmapで設定したマゼンタ=透明の
+       情報がここで失われると、DWM側ではアルファ255(不透明)として扱われ、
+       サムネイルの背景がマゼンタ(見た目は紫寄り)に映ってしまう（実際に
+       報告された不具合）。コピー後にもう一度同じ基準でアルファを設定し
+       直すことで、拡縮後も透明部分が正しく抜けるようにする。 */
+    unsigned char *px = (unsigned char *)bits;
+    for (int i = 0; i < dstW * dstH; i++)
+    {
+        unsigned char b = px[i * 4 + 0];
+        unsigned char g = px[i * 4 + 1];
+        unsigned char r = px[i * 4 + 2];
+        int isMagenta = (r == 255 && g == 0 && b == 255);
+        px[i * 4 + 3] = (unsigned char)(isMagenta ? 0 : 255);
+    }
+
+    return dstBmp;
+}
+
+/* WM_DWMSENDICONICTHUMBNAIL応答: タスクバーボタンにマウスを乗せた時の
+   小さなサムネイル。lParamで要求された箱に収まるよう、アスペクト比を
+   保ったまま縮小する。 */
+static void RespondPlayerIconicThumbnail(Player *p, int reqW, int reqH)
+{
+    if (!p->iconicBitmap || reqW <= 0 || reqH <= 0)
+        return;
+
+    BITMAP bmInfo;
+    if (!GetObject(p->iconicBitmap, sizeof(bmInfo), &bmInfo) ||
+        bmInfo.bmWidth <= 0 || bmInfo.bmHeight <= 0)
+        return;
+
+    float scaleW = (float)reqW / (float)bmInfo.bmWidth;
+    float scaleH = (float)reqH / (float)bmInfo.bmHeight;
+    float scale = (scaleW < scaleH) ? scaleW : scaleH;
+    int dstW = (int)(bmInfo.bmWidth * scale);
+    int dstH = (int)(bmInfo.bmHeight * scale);
+    if (dstW < 1)
+        dstW = 1;
+    if (dstH < 1)
+        dstH = 1;
+
+    HBITMAP scaled = CopyPlayerBitmapScaled(p->iconicBitmap, bmInfo.bmWidth, bmInfo.bmHeight, dstW, dstH);
+    if (scaled)
+        DwmSetIconicThumbnail(p->hwnd, scaled, 0);
+}
+
+/* WM_DWMSENDICONICLIVEPREVIEWBITMAP応答: タスクバーボタンをクリックした
+   時のAero Peekの大きなプレビュー。原寸大のキャプチャをそのまま渡す。 */
+static void RespondPlayerIconicLivePreview(Player *p)
+{
+    if (!p->iconicBitmap)
+        return;
+
+    BITMAP bmInfo;
+    if (!GetObject(p->iconicBitmap, sizeof(bmInfo), &bmInfo) ||
+        bmInfo.bmWidth <= 0 || bmInfo.bmHeight <= 0)
+        return;
+
+    HBITMAP copy = CopyPlayerBitmapScaled(p->iconicBitmap, bmInfo.bmWidth, bmInfo.bmHeight, bmInfo.bmWidth, bmInfo.bmHeight);
+    if (copy)
+        DwmSetIconicLivePreviewBitmap(p->hwnd, copy, NULL, 0);
+}
+
 static LRESULT CALLBACK PlayerWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     switch (msg)
@@ -213,6 +387,20 @@ static LRESULT CALLBACK PlayerWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
         return 0;
     case WM_ERASEBKGND:
         return 1;
+    case WM_DWMSENDICONICTHUMBNAIL:
+    {
+        Player *p = Player_GetActive();
+        if (p)
+            RespondPlayerIconicThumbnail(p, LOWORD(lParam), HIWORD(lParam));
+        return 0;
+    }
+    case WM_DWMSENDICONICLIVEPREVIEWBITMAP:
+    {
+        Player *p = Player_GetActive();
+        if (p)
+            RespondPlayerIconicLivePreview(p);
+        return 0;
+    }
     case WM_MOUSEACTIVATE:
         /* HandlePlayerFormMessages: プレイヤーはクリックしてもアクティブ化されない。 */
         return MA_NOACTIVATE;
@@ -284,6 +472,8 @@ HWND CreatePlayerWindow(HINSTANCE hInstance, Player *p, int startX, int startY)
     p->lastValidParentIdx = -1;
     p->inheritedFlipX = 0;
     p->inheritedFlipY = 0;
+    p->minimizeAnimState = 0;
+    p->iconicBitmap = NULL;
     Anim_Init(&p->anim);
 
     int dx, dy, dw, dh;
@@ -355,6 +545,14 @@ void Player_Reset(Player *p, int startX, int startY)
     p->lastValidParentIdx = -1;
     p->inheritedFlipX = 0;
     p->inheritedFlipY = 0;
+    p->minimizeAnimState = 0;
+    /* 最小化アニメーションの途中でステージがリセットされた場合に備え、
+       上書きする前に解放する（GDIリソースリークの防止）。 */
+    if (p->iconicBitmap)
+    {
+        DeleteObject(p->iconicBitmap);
+        p->iconicBitmap = NULL;
+    }
     Anim_Init(&p->anim);
     if (p->hwnd)
     {
@@ -1444,6 +1642,79 @@ static float DistanceToMovableBoundsTop(const Player *p)
     return distance < 0.0f ? 0.0f : distance;
 }
 
+/* GameWindow.cのMinimizeAnimPointRect/LerpIntと同じ考え方をプレイヤーにも
+   適用する（GameWindowData.minimizeAnimState等と同じ仕組み）。定数は
+   gamewindow.hのMINIMIZE_ANIM_DURATION/MINIMIZE_ANIM_POINT_SIZEをそのまま
+   使い、ウィンドウの縮小アニメーションと同じ速さ・同じ最終サイズで
+   タイミングが揃うようにする。 */
+static RECT PlayerMinimizeAnimPointRect(int cx, int cy)
+{
+    int h = MINIMIZE_ANIM_POINT_SIZE / 2;
+    RECT r = {cx - h, cy - h, cx + h, cy + h};
+    return r;
+}
+
+static int PlayerLerpInt(int a, int b, float t)
+{
+    return a + (int)((b - a) * t);
+}
+
+void Player_StartMinimizeAnim(Player *p)
+{
+    if (p->isMinimized || p->minimizeAnimState != 0 || !p->hwnd)
+        return;
+
+    /* 通常の物理演算/移動更新をここで即座に停止する（Player_Update先頭の
+       ガード）。乗っているウィンドウ側の縮小アニメーションが完了する
+       （実際に非表示になる）まで数百msあり、その間も重力・接地判定が
+       働き続けると、縮小中で不安定な床の上から落下してしまっていた
+       （実際に報告された不具合）。parentIdxの記録や実際のウィンドウの
+       非表示化はまだ行わない -- それらはアニメーション完了時に呼ばれる
+       Player_OnMinimizeが引き続き正しい親を記録できるよう、そのタイミング
+       まで据え置く。 */
+    p->isMinimized = 1;
+
+    /* 縮小アニメーションで実際に小さくする前に、フルサイズの見た目を1回
+       だけキャプチャしてDWMへ渡す準備をする（GameWindow.cの
+       CaptureIconicBitmapと同じ理由: 数px四方まで縮んだ後の内容が
+       タスクバーサムネイルに映ってしまう不具合を防ぐ）。 */
+    CapturePlayerIconicBitmap(p);
+    BOOL trueVal = TRUE;
+    DwmSetWindowAttribute(p->hwnd, DWMWA_HAS_ICONIC_BITMAP, &trueVal, sizeof(trueVal));
+    DwmSetWindowAttribute(p->hwnd, DWMWA_FORCE_ICONIC_REPRESENTATION, &trueVal, sizeof(trueVal));
+    DwmInvalidateIconicBitmaps(p->hwnd);
+
+    GetWindowRect(p->hwnd, &p->minimizeAnimFrom);
+    int cx = (p->minimizeAnimFrom.left + p->minimizeAnimFrom.right) / 2;
+    int screenBottom = GetSystemMetrics(SM_CYSCREEN);
+    p->minimizeAnimTo = PlayerMinimizeAnimPointRect(cx, screenBottom);
+    p->minimizeAnimT = 0.0f;
+    p->minimizeAnimState = 1;
+}
+
+void Player_UpdateMinimizeAnim(Player *p, float dt)
+{
+    if (p->minimizeAnimState == 0 || !p->hwnd)
+        return;
+
+    p->minimizeAnimT += dt / MINIMIZE_ANIM_DURATION;
+    float t = p->minimizeAnimT;
+    if (t > 1.0f)
+        t = 1.0f;
+
+    RECT from = p->minimizeAnimFrom;
+    RECT to = p->minimizeAnimTo;
+    int x = PlayerLerpInt(from.left, to.left, t);
+    int y = PlayerLerpInt(from.top, to.top, t);
+    int w = PlayerLerpInt(from.right - from.left, to.right - to.left, t);
+    int h = PlayerLerpInt(from.bottom - from.top, to.bottom - to.top, t);
+    SetWindowPos(p->hwnd, NULL, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+    InvalidateRect(p->hwnd, NULL, FALSE);
+
+    if (p->minimizeAnimT >= 1.0f)
+        p->minimizeAnimState = 0;
+}
+
 void Player_OnMinimize(Player *p)
 {
     p->isMinimized = 1;
@@ -1469,9 +1740,22 @@ void Player_OnMinimize(Player *p)
 void Player_OnRestore(Player *p)
 {
     p->isMinimized = 0;
+    p->minimizeAnimState = 0;
 
     if (p->hwnd)
+    {
         ShowWindow(p->hwnd, SW_RESTORE);
+        /* 通常の描画に戻すため、強制アイコン表現を解除しキャプチャした
+           ビットマップを解放する（次に最小化される時にCapturePlayerIconicBitmap
+           で改めて撮り直す。GameWindow.cのSetWindowMinimized復元処理と同じ）。 */
+        BOOL falseVal = FALSE;
+        DwmSetWindowAttribute(p->hwnd, DWMWA_FORCE_ICONIC_REPRESENTATION, &falseVal, sizeof(falseVal));
+    }
+    if (p->iconicBitmap)
+    {
+        DeleteObject(p->iconicBitmap);
+        p->iconicBitmap = NULL;
+    }
 
     RECT bounds;
     Player_GetBounds(p, &bounds);

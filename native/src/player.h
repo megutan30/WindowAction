@@ -32,6 +32,18 @@ typedef struct {
        見た目のミラー描画だけでなく、重力とジャンプの向きの反転にも使う
        （上下逆さの床/天井の上に立つ）。inheritedFlipXは見た目のみ。 */
     int inheritedFlipX, inheritedFlipY;
+    /* 最小化の縮小アニメーション状態(GameWindowData.minimizeAnimState等と
+       同じ仕組み)。0=無し、1=縮小中。Player_StartMinimizeAnim/
+       Player_UpdateMinimizeAnim参照。 */
+    int minimizeAnimState;
+    float minimizeAnimT;
+    RECT minimizeAnimFrom;
+    RECT minimizeAnimTo;
+    /* GameWindowData.iconicBitmapと同じ仕組み: 縮小アニメーションを開始する
+       直前にフルサイズの見た目を1回だけキャプチャしておいたもの。DWMの
+       タスクバーサムネイル/ライブプレビュー用（PlayerWindowProcの
+       WM_DWMSENDICONICTHUMBNAIL/WM_DWMSENDICONICLIVEPREVIEWBITMAP参照）。 */
+    HBITMAP iconicBitmap;
     HWND hwnd;
     PlayerAnimation anim;
 } Player;
@@ -74,6 +86,20 @@ void Player_MirrorWithinParent(Player *p, int windowIndex, RECT parentBounds, in
    切り離し、後の Player_OnRestore のために記憶しておく。プレイヤーが乗っている
    ウィンドウが最小化されたときに呼ばれる PlayerForm.OnMinimize を反映。 */
 void Player_OnMinimize(Player *p);
+
+/* 乗っているウィンドウの最小化アニメーションが開始した瞬間に一度だけ呼ぶ
+   （SetWindowMinimized参照）。GameWindowの縮小アニメーションと同じく、
+   画面下端(タスクバー方向)へ向かって縮んでいく見た目のアニメーションを
+   開始する。プレイヤーの通常の物理演算/移動更新はここで即座に停止する
+   （isMinimized=1、Player_Update先頭のガード）が、parentIdxの記録や実際の
+   ウィンドウの非表示化は行わない -- それらはアニメーション完了時に呼ばれる
+   Player_OnMinimizeが引き続き担当する。 */
+void Player_StartMinimizeAnim(Player *p);
+
+/* Player_StartMinimizeAnimで開始した縮小アニメーションを1フレーム分進める。
+   isMinimizedの値に関わらず（Player_Updateとは別経路で）毎フレーム呼ぶ
+   こと。アニメーション中でなければ即座に戻る。 */
+void Player_UpdateMinimizeAnim(Player *p, float dt);
 
 /* プレイヤーのフリーズを解除する。記憶していた親がまだ有効で、最小化されておらず、
    重なりも維持していればそこに再アタッチする。そうでなければプレイヤーの現在位置に

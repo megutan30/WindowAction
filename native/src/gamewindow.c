@@ -1152,6 +1152,67 @@ static RECT MinimizeAnimPointRect(int cx, int cy)
     return r;
 }
 
+/* 最小化の縮小アニメーションを1つのウィンドウに対して開始する（見た目・
+   DWMサムネイル準備の共通処理）。SetWindowMinimized自身と、その子孫を
+   まとめて動かすStartMinimizeAnimSubtreeの両方から呼ぶ。 */
+static void StartMinimizeAnim(GameWindowData *data)
+{
+    if (!data->hwnd || data->minimized || data->minimizeAnimState != 0)
+        return;
+
+    /* 縮小アニメーションで実際にウィンドウを小さくする前に、フルサイズの
+       見た目を1回だけキャプチャしてDWMへ渡す準備をする（RespondIconic*
+       参照）。DWMWA_FORCE_ICONIC_REPRESENTATIONを立てることで、以後
+       ウィンドウが最小化されている間はDWMが自動キャプチャを使わず
+       必ずWM_DWMSENDICONICTHUMBNAIL/WM_DWMSENDICONICLIVEPREVIEWBITMAPで
+       問い合わせてくるようになり、数px四方まで縮んだ後の内容が
+       タスクバーサムネイルに映ってしまう不具合を防げる。 */
+    CaptureIconicBitmap(data);
+    BOOL trueVal = TRUE;
+    DwmSetWindowAttribute(data->hwnd, DWMWA_HAS_ICONIC_BITMAP, &trueVal, sizeof(trueVal));
+    DwmSetWindowAttribute(data->hwnd, DWMWA_FORCE_ICONIC_REPRESENTATION, &trueVal, sizeof(trueVal));
+    /* 属性を立てただけではDWMが即座に問い合わせてくるとは限らない
+       （「更新中」のプレースホルダのまま止まって見えることがあった --
+       実際に報告された不具合）。明示的にDwmInvalidateIconicBitmapsを
+       呼び、WM_DWMSENDICONICTHUMBNAIL/WM_DWMSENDICONICLIVEPREVIEWBITMAPを
+       今すぐ問い合わせさせる。 */
+    DwmInvalidateIconicBitmaps(data->hwnd);
+
+    GetWindowRect(data->hwnd, &data->minimizeAnimFrom);
+    int cx = (data->minimizeAnimFrom.left + data->minimizeAnimFrom.right) / 2;
+    /* 収縮先をウィンドウ自身の下端ではなく画面（タスクバー）の下端にする
+       -- 自身の下端だと、画面の上の方にあるウィンドウほど本来のタスク
+       バーの位置とかけ離れた高さで収縮してしまい、見た目上左上寄りへ
+       消えていくように見えてしまう（実際に報告された不具合）。実際の
+       Windowsの最小化ジーニーと同じく、常に画面下端(タスクバー方向)へ
+       向かって縮んでいくようにする。 */
+    int screenBottom = GetSystemMetrics(SM_CYSCREEN);
+    data->minimizeAnimTo = MinimizeAnimPointRect(cx, screenBottom);
+    data->minimizeAnimT = 0.0f;
+    data->minimizeAnimState = 1;
+}
+
+/* rootIndexの全子孫（ボタンを除く。ボタンは元々サイズ変更が無く、最小化時も
+   Hierarchy_MinimizeSubtreeが即座に非表示にするだけで違和感が無い）にも、
+   同じ縮小アニメーションを開始する。ルート自身がめり込んで消えるのに、
+   その中にいる子孫だけ何の演出も無く一瞬で消えてしまう（実際に報告された
+   不具合）のを防ぐ。SetWindowMinimizedがrootIndex自身の分を開始した直後に
+   呼ぶこと。 */
+static void StartMinimizeAnimSubtree(int rootIndex)
+{
+    GameWindowData *root = GetWindowData(rootIndex);
+    if (!root)
+        return;
+    for (int i = 0; i < root->childCount; i++)
+    {
+        GameWindowData *child = GetWindowData(root->childIdx[i]);
+        if (!child || IsButtonKind(child->kind))
+            continue;
+        StartMinimizeAnim(child);
+        StartMinimizeAnimSubtree(root->childIdx[i]);
+    }
+}
+
 void SetWindowMinimized(int index, int minimized)
 {
     /* GameWindow.OnMinimize/OnRestoreは非対称: 最小化はサブツリー全体
@@ -1177,36 +1238,26 @@ void SetWindowMinimized(int index, int minimized)
         if (data->minimized || data->minimizeAnimState != 0)
             return;
 
-        /* 縮小アニメーションで実際にウィンドウを小さくする前に、フルサイズの
-           見た目を1回だけキャプチャしてDWMへ渡す準備をする（RespondIconic*
-           参照）。DWMWA_FORCE_ICONIC_REPRESENTATIONを立てることで、以後
-           ウィンドウが最小化されている間はDWMが自動キャプチャを使わず
-           必ずWM_DWMSENDICONICTHUMBNAIL/WM_DWMSENDICONICLIVEPREVIEWBITMAPで
-           問い合わせてくるようになり、数px四方まで縮んだ後の内容が
-           タスクバーサムネイルに映ってしまう不具合を防げる。 */
-        CaptureIconicBitmap(data);
-        BOOL trueVal = TRUE;
-        DwmSetWindowAttribute(data->hwnd, DWMWA_HAS_ICONIC_BITMAP, &trueVal, sizeof(trueVal));
-        DwmSetWindowAttribute(data->hwnd, DWMWA_FORCE_ICONIC_REPRESENTATION, &trueVal, sizeof(trueVal));
-        /* 属性を立てただけではDWMが即座に問い合わせてくるとは限らない
-           （「更新中」のプレースホルダのまま止まって見えることがあった --
-           実際に報告された不具合）。明示的にDwmInvalidateIconicBitmapsを
-           呼び、WM_DWMSENDICONICTHUMBNAIL/WM_DWMSENDICONICLIVEPREVIEWBITMAPを
-           今すぐ問い合わせさせる。 */
-        DwmInvalidateIconicBitmaps(data->hwnd);
+        StartMinimizeAnim(data);
+        /* ルート自身だけでなく、その子孫（ウィンドウ内に乗っている他の
+           ウィンドウ）も同じ縮小アニメーションで一緒に消えていくように
+           する（実際に報告された不具合: 子孫が縮小せず一瞬で消えていた）。 */
+        StartMinimizeAnimSubtree(index);
 
-        GetWindowRect(data->hwnd, &data->minimizeAnimFrom);
-        int cx = (data->minimizeAnimFrom.left + data->minimizeAnimFrom.right) / 2;
-        /* 収縮先をウィンドウ自身の下端ではなく画面（タスクバー）の下端にする
-           -- 自身の下端だと、画面の上の方にあるウィンドウほど本来のタスク
-           バーの位置とかけ離れた高さで収縮してしまい、見た目上左上寄りへ
-           消えていくように見えてしまう（実際に報告された不具合）。実際の
-           Windowsの最小化ジーニーと同じく、常に画面下端(タスクバー方向)へ
-           向かって縮んでいくようにする。 */
-        int screenBottom = GetSystemMetrics(SM_CYSCREEN);
-        data->minimizeAnimTo = MinimizeAnimPointRect(cx, screenBottom);
-        data->minimizeAnimT = 0.0f;
-        data->minimizeAnimState = 1;
+        /* プレイヤーがこのサブツリー内にいる場合、Player_StartMinimizeAnimで
+           プレイヤー自身も同じ縮小アニメーションを開始する。物理演算は
+           アニメーション完了(Hierarchy_MinimizeSubtree経由でPlayer_OnMinimize
+           が呼ばれるタイミング)を待たず、この開始と同時に凍結される
+           （そうしないと、実際に消えるまでの数百msの間も重力/接地判定が
+           働き続け、縮小中で不安定な床の上から落下してしまっていた --
+           実際に報告された不具合）。parentIdx/hwndの後始末（Player_OnMinimize
+           が行う）はアニメーション完了時のまま据え置かれる。 */
+        Player *p = Player_GetActive();
+        if (p && p->parentIdx >= 0 &&
+            (p->parentIdx == index || Hierarchy_IsDescendantOf(p->parentIdx, index)))
+        {
+            Player_StartMinimizeAnim(p);
+        }
     }
     else
     {
