@@ -113,16 +113,47 @@ static int RoundToNearest(float v)
     return (v >= 0.0f) ? (int)(v + 0.5f) : (int)(v - 0.5f);
 }
 
-/* Goal/ボタン共通: origSizeGenが現在の世代と一致しなければ、現在の実矩形を
-   このジェスチャー（または「今まさにこの親に子として現れた瞬間」）の基準
-   としてその場で確立する。Hierarchy_ApplyRelativeTransformの通常の子
-   ウィンドウに対する遅延確立(236-244行目)と全く同じパターン -- ジェスチャー
-   途中で親になった/子になった場合でも瞬間的なジャンプが起きない。 */
-static void EnsureOrigBoundsForGeneration(GameWindowData *w)
+/* Goal/ボタン共通: origSizeGenが現在の世代と一致しなければ、このジェスチャー
+   （または「今まさにこの親に子として現れた瞬間」）の基準をその場で確立する。
+   Goal_UpdateParent/Button_UpdateParentは毎フレーム無条件に親子判定を
+   行うため、ドラッグ中のウィンドウにGoal/ボタンが後から新しく子として
+   現れることは（プレイヤーが歩いて部屋に入るのと同様に）普通に起こりうる。
+   単に現在の実矩形をそのまま基準にしてしまうと、確立したその同じフレームで
+   newSize = currentSize * scale（scaleはジェスチャー開始からの累積値）が
+   即座に適用されてしまい、既にある程度リサイズが進行した状態のウィンドウに
+   入った瞬間、その累積分だけ大きさ・位置が一気にジャンプする（実際に
+   報告された不具合: 親を持たないGoal/ボタンがリサイズ中のウィンドウに
+   入ると急激に大きさが変わる）。
+   逆算方式（origSize = currentSize / scale、origOffset = currentOffset /
+   scale）で基準を求めることで、確立した瞬間はnewSize = origSize * scaleが
+   ちょうど現在のサイズ・位置に戻り（丸め誤差の範囲でジャンプなし）、以降の
+   フレームだけがそこからの本当のスケール変化を反映する。通常の子ウィンドウ
+   に対する遅延確立(236-244行目)は現在の実矩形をそのまま基準にする単純な
+   方式だが、それらは本来ドラッグ中の相手にしか新しく子にならない
+   （Hierarchy_CheckAndUpdateは操作対象自身の親子判定のみを行う）ため
+   この問題が実質的に起こらない -- Goal/ボタンのように毎フレーム無条件に
+   再判定される場合だけ、この逆算が必要になる。 */
+static void EnsureOrigBoundsForGeneration(GameWindowData *w, RECT oldRect, RECT newRect, float scaleX, float scaleY)
 {
     if (w->origSizeGen == g_resizeGeneration)
         return;
-    GetWindowFullBounds(w->hwnd, &w->origBoundsAtResizeStart);
+
+    RECT cur;
+    GetWindowFullBounds(w->hwnd, &cur);
+
+    int origW = RoundToNearest((float)(cur.right - cur.left) / scaleX);
+    int origH = RoundToNearest((float)(cur.bottom - cur.top) / scaleY);
+    if (origW < 1)
+        origW = 1;
+    if (origH < 1)
+        origH = 1;
+    int origLeft = oldRect.left + RoundToNearest((float)(cur.left - newRect.left) / scaleX);
+    int origTop = oldRect.top + RoundToNearest((float)(cur.top - newRect.top) / scaleY);
+
+    w->origBoundsAtResizeStart.left = origLeft;
+    w->origBoundsAtResizeStart.top = origTop;
+    w->origBoundsAtResizeStart.right = origLeft + origW;
+    w->origBoundsAtResizeStart.bottom = origTop + origH;
     w->origSizeGen = g_resizeGeneration;
 }
 
@@ -136,7 +167,7 @@ static void ApplyScaleToGoalIfParented(int rootIndex, RECT oldRect, RECT newRect
     if (goal->parentIdx != rootIndex || !goal->hwnd || goal->minimized)
         return;
 
-    EnsureOrigBoundsForGeneration(goal);
+    EnsureOrigBoundsForGeneration(goal, oldRect, newRect, scaleX, scaleY);
     RECT goalOldRect = goal->origBoundsAtResizeStart;
 
     /* 以前はサイズ上限・下限として常にGoal自身の固定値(20x20)を使っていた
@@ -198,7 +229,7 @@ static void ApplyScaleToButtonsIfParented(int rootIndex, RECT oldRect, RECT newR
         if (!IsButtonWindowKind(btn->kind) || btn->parentIdx != rootIndex || !btn->hwnd || btn->minimized)
             continue;
 
-        EnsureOrigBoundsForGeneration(btn);
+        EnsureOrigBoundsForGeneration(btn, oldRect, newRect, scaleX, scaleY);
         RECT btnOldRect = btn->origBoundsAtResizeStart;
 
         /* Goalと同じ理由で、ボタン自身の固定値(150x40)ではなく呼び出し元の
