@@ -765,7 +765,10 @@ static void PaintGameWindow(HWND hwnd, int index)
    CreateCompatibleBitmapで作った通常のDDBを渡すと、DWM側で受理されず
    タスクバーのサムネイルが「更新中」のまま止まってしまうことがある
    （実際に報告された不具合）。 */
-static HBITMAP CreateArgbDibSection(HDC referenceDC, int w, int h)
+/* outBitsが非NULLなら、生成したDIBセクションのピクセルバッファ先頭を
+   書き出す -- CaptureIconicBitmapがGoalのマゼンタ画素にアルファ0を
+   焼き込むために直接触る必要がある。 */
+static HBITMAP CreateArgbDibSection(HDC referenceDC, int w, int h, void **outBits)
 {
     BITMAPINFO bmi;
     ZeroMemory(&bmi, sizeof(bmi));
@@ -776,7 +779,10 @@ static HBITMAP CreateArgbDibSection(HDC referenceDC, int w, int h)
     bmi.bmiHeader.biBitCount = 32;
     bmi.bmiHeader.biCompression = BI_RGB;
     void *bits = NULL;
-    return CreateDIBSection(referenceDC, &bmi, DIB_RGB_COLORS, &bits, NULL, 0);
+    HBITMAP bmp = CreateDIBSection(referenceDC, &bmi, DIB_RGB_COLORS, &bits, NULL, 0);
+    if (outBits)
+        *outBits = bits;
+    return bmp;
 }
 
 /* 縮小アニメーションを開始する直前に一度だけ呼ぶ。ウィンドウが「今まさに
@@ -804,12 +810,37 @@ static void CaptureIconicBitmap(GameWindowData *data)
 
     HDC hdcWin = GetDC(data->hwnd);
     HDC hdcMem = CreateCompatibleDC(hdcWin);
-    HBITMAP bmp = CreateArgbDibSection(hdcWin, w, h);
+    void *bits = NULL;
+    HBITMAP bmp = CreateArgbDibSection(hdcWin, w, h, &bits);
     HBITMAP oldBmp = (HBITMAP)SelectObject(hdcMem, bmp);
     BitBlt(hdcMem, 0, 0, w, h, hdcWin, 0, 0, SRCCOPY);
     SelectObject(hdcMem, oldBmp);
     DeleteDC(hdcMem);
     ReleaseDC(data->hwnd, hdcWin);
+
+    /* GoalはSetLayeredWindowAttributes(..., RGB(255,0,255), LWA_COLORKEY)で
+       マゼンタ画素を透過させているが、これは実際の画面合成時にDWMが行う
+       効果であり、GetDC+BitBltで取得した生のピクセルデータ自体には反映
+       されない -- そのままDwmSetIconicThumbnail/LivePreviewへ渡すと、
+       タスクバーのサムネイル上ではマゼンタが不透明な色としてそのまま
+       写り込んでしまう（実際に報告された不具合）。GDIのBitBltはアルファ
+       チャンネルを一切書き込まないため、この時点では全画素のアルファが
+       0のまま -- DWMは「全画素アルファ0」を特殊ケースとして不透明画像
+       扱いするため、通常のウィンドウ（マゼンタを使わない）はこれで
+       たまたま正しく表示されている。Goalだけはマゼンタ画素にアルファ0
+       （透明）、それ以外の画素に明示的にアルファ255（不透明）を焼き込み、
+       DWMに実際のライブ表示と同じ透過を伝える。 */
+    if (data->kind == WT_GOAL && bits)
+    {
+        UINT32 *px = (UINT32 *)bits;
+        int count = w * h;
+        for (int i = 0; i < count; i++)
+        {
+            UINT32 c = px[i];
+            int isMagenta = ((c & 0x00FFFFFFu) == 0x00FF00FFu);
+            px[i] = isMagenta ? 0x00000000u : (0xFF000000u | (c & 0x00FFFFFFu));
+        }
+    }
 
     data->iconicBitmap = bmp;
 }
@@ -824,7 +855,7 @@ static HBITMAP CopyBitmapScaled(HBITMAP src, int srcW, int srcH, int dstW, int d
     HDC screenDC = GetDC(NULL);
     HDC srcDC = CreateCompatibleDC(screenDC);
     HDC dstDC = CreateCompatibleDC(screenDC);
-    HBITMAP dstBmp = CreateArgbDibSection(screenDC, dstW, dstH);
+    HBITMAP dstBmp = CreateArgbDibSection(screenDC, dstW, dstH, NULL);
     ReleaseDC(NULL, screenDC);
 
     HBITMAP oldSrc = (HBITMAP)SelectObject(srcDC, src);
