@@ -17,6 +17,16 @@
    クライアント領域最上部にこの高さ分のタイトルバー帯を自前で描画する
    （PaintGameWindow参照）。 */
 #define TITLE_BAR_HEIGHT 30
+/* 親を持たないウィンドウ（NoEntryでも外観カスタマイズ済みでもない）の既定
+   アウトライン。OSの通常ウィンドウに近い控えめな見た目にするため、種別を
+   問わず単一色の細い枠に統一する -- 地面（隣接ウィンドウとの境界）の位置が
+   分かる程度の最小限の太さにとどめる。 */
+#define DEFAULT_OUTLINE_COLOR RGB(120, 120, 120)
+#define DEFAULT_OUTLINE_WIDTH_NO_PARENT 1
+/* 親を持つウィンドウのアウトライン太さ。CalculateOutlineColorで親の背景色
+   から算出した色を使い、親を持たないウィンドウよりはっきり太く描くことで、
+   どのウィンドウがどれの子なのか一目で分かるようにする。 */
+#define PARENT_OUTLINE_WIDTH 5
 /* 制限なしリサイズ+反転ウィンドウ(WT_UNCONSTRAINED*)専用の絶対サイズ下限。
    実HWNDは常に正サイズを維持する必要があるため、論理サイズが0を跨いでも
    実際のウィンドウが完全に潰れないよう、MIN_WINDOW_SIZEより小さいこの値を

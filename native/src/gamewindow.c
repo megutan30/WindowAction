@@ -621,16 +621,29 @@ static void PaintGameWindow(HWND hwnd, int index)
     {
         DrawClockwiseStripeBorder(memDC, rc, data->stripeOffset);
     }
-    else if (data->parentIdx >= 0 || data->hasCustomAppearance)
+    else
     {
-        /* WindowRenderingManagerは、親を持つ全てのウィンドウ（独自の縞模様を
-           持つNoEntryウィンドウだけでなく）に対して、この親色に基づく
-           アウトラインを描画する。外観カスタマイズでoutlineColorが明示的に
-           設定されている場合はそちらを優先する。 */
-        COLORREF outline = data->hasCustomAppearance
-                                ? data->outlineColor
-                                : CalculateOutlineColor(g_windows[data->parentIdx].bg);
-        HPEN pen = CreatePen(PS_SOLID, 5, outline);
+        /* 親を持たないウィンドウはOSの通常ウィンドウに近い控えめな単一色・
+           細線(DEFAULT_OUTLINE_COLOR/DEFAULT_OUTLINE_WIDTH_NO_PARENT)。
+           親を持つウィンドウは、どれがどの子なのか一目で分かるように、
+           親の背景色から算出した色(CalculateOutlineColor)ではっきり太く
+           (PARENT_OUTLINE_WIDTH)描く -- こちらは単一色に統一しない。
+           外観カスタマイズでoutlineColorが明示的に設定されている場合は
+           色のみそちらを優先する。 */
+        COLORREF outline;
+        int outlineWidth;
+        if (data->parentIdx >= 0)
+        {
+            outline = data->hasCustomAppearance ? data->outlineColor
+                                                 : CalculateOutlineColor(g_windows[data->parentIdx].bg);
+            outlineWidth = PARENT_OUTLINE_WIDTH;
+        }
+        else
+        {
+            outline = data->hasCustomAppearance ? data->outlineColor : DEFAULT_OUTLINE_COLOR;
+            outlineWidth = DEFAULT_OUTLINE_WIDTH_NO_PARENT;
+        }
+        HPEN pen = CreatePen(PS_SOLID, outlineWidth, outline);
         HPEN oldOutlinePen = (HPEN)SelectObject(memDC, pen);
         HBRUSH oldOutlineBrush = (HBRUSH)SelectObject(memDC, GetStockObject(NULL_BRUSH));
         Rectangle(memDC, rc.left, rc.top, rc.right, rc.bottom);
