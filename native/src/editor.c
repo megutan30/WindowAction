@@ -89,6 +89,8 @@ static const PaletteEntry kPalette[] = {
 
 int Editor_IsTestStage(void) { return g_isTestStage; }
 
+void Editor_LeaveTestStage(void) { g_isTestStage = 0; }
+
 void Editor_LoadTestStage(HINSTANCE hInstance)
 {
     ResetWindowRegistry();

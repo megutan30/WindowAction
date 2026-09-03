@@ -24,6 +24,13 @@ void Editor_LoadTestStage(HINSTANCE hInstance);
    スキップすべき箇所で参照する。 */
 int Editor_IsTestStage(void);
 
+/* テストステージ状態を解除する。LoadStage(main.c)が通常ステージ（Title/
+   Retry/Next）をロードする際に呼ぶこと -- 呼ばないと、一度でもテストモードに
+   入るとg_isTestStageが立ったままになり、以降ずっとCheckGoalがスキップされ
+   続けて通常ステージのゴール判定が二度と機能しなくなる（実際に報告された
+   不具合）。 */
+void Editor_LeaveTestStage(void);
+
 /* パレットアイコン(index)のドラッグを開始する（WM_LBUTTONDOWN）。 */
 void Editor_StartPaletteDrag(int index);
 

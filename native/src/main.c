@@ -18,6 +18,9 @@ static void LoadStage(HINSTANCE hInstance, int index)
     if (index >= Stage_Count())
         index = Stage_Count() - 1;
 
+#ifdef ENABLE_STAGE_EDITOR
+    Editor_LeaveTestStage();
+#endif
     Stage_Load(hInstance, index);
 
     int sx, sy;
