@@ -325,7 +325,11 @@ static void UpdateResizable(int index, GameWindowData *data)
         RECT rootOrigRect = {outer.left, outer.top, outer.left + data->resizeOrigSize.cx,
                               outer.top + data->resizeOrigSize.cy};
         RECT rootNewRect = {outer.left, outer.top, outer.left + validated.cx, outer.top + validated.cy};
-        Hierarchy_ApplyRelativeTransform(index, rootOrigRect, rootNewRect, MIN_WINDOW_SIZE, MAX_WINDOW_SIZE);
+        /* 子自身にはMIN_WINDOW_SIZEの下限を課さない -- 親（このウィンドウ
+           自身）は上のproposed.cx/cyクランプで既にMIN_WINDOW_SIZE未満に
+           なれないため、子は親が縮む分だけ比例して自由に縮められる形で
+           間接的に親のサイズ制限を受ける（実際に要望された挙動）。 */
+        Hierarchy_ApplyRelativeTransform(index, rootOrigRect, rootNewRect, CHILD_UNBOUNDED_MIN_SIZE, MAX_WINDOW_SIZE);
 
         InvalidateRect(data->hwnd, NULL, FALSE);
         /* 拡大直後、実際にWM_PAINTで塗りつぶされるまで新しい領域が黒く

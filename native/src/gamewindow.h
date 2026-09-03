@@ -13,6 +13,13 @@
 #define MAX_CHILDREN 8
 #define MAX_NOENTRY_ZONES 8
 #define MIN_WINDOW_SIZE 100
+/* 通常のResizableウィンドウ自身にはMIN_WINDOW_SIZEの下限がかかるが、その
+   子（ネストされたウィンドウ・プレイヤー・Goal・ボタン）には課さない --
+   Hierarchy_ApplyRelativeTransform/Player_ApplyParentRelativeTransformへ
+   minSizeとして渡す。子は親が縮む分だけ比例して縮むため、結果的に親自身の
+   サイズ制限は（親を超えては縮小/拡大できないという形で）間接的に受ける。
+   0/負のサイズにだけはならないよう1を下限にする。 */
+#define CHILD_UNBOUNDED_MIN_SIZE 1
 /* ゲーム描画のカスタムタイトルバーの高さ(px)。WS_CAPTIONを使わず、
    クライアント領域最上部にこの高さ分のタイトルバー帯を自前で描画する
    （PaintGameWindow参照）。 */
