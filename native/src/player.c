@@ -463,7 +463,6 @@ HWND CreatePlayerWindow(HINSTANCE hInstance, Player *p, int startX, int startY)
     p->y = (float)startY;
     p->width = PLAYER_SIZE;
     p->height = PLAYER_SIZE;
-    p->origSizeGen = 0;
     p->lastAppliedParentIdx = -1;
     p->vy = 0.0f;
     p->grounded = 0;
@@ -538,7 +537,6 @@ void Player_Reset(Player *p, int startX, int startY)
     p->y = (float)startY;
     p->width = PLAYER_SIZE;
     p->height = PLAYER_SIZE;
-    p->origSizeGen = 0;
     p->lastAppliedParentIdx = -1;
     p->vy = 0.0f;
     p->grounded = 0;
@@ -601,19 +599,19 @@ void Player_ApplyParentRelativeTransform(Player *p, int windowIndex, RECT newRec
     if (p->parentIdx != windowIndex)
         return;
 
-    /* このリサイズ世代でまだ一度もこの関数に触れられていない場合（ジェスチャー
-       開始時点から既にこの親の内部にいた、またはジェスチャーの途中で新たに
-       入ってきた）は、現在のサイズ・位置・親矩形をこの場でベースラインとして
-       確立するだけにとどめ、今フレームでのスケール適用は行わない。
-       もしここでジェスチャー開始時点の矩形(oldRect)を基準にスケールを
-       適用してしまうと、プレイヤーが既にある程度リサイズが進行した状態の
-       ウィンドウへ途中から入ってきた場合、「ジェスチャー開始時点からずっと
-       そこにいたかのような」倍率が入った瞬間に一気に掛かってしまい、
-       サイズ・位置が瞬間的に大きくジャンプしてしまう（実際に報告された
-       不具合: あらかじめリサイズしておいたウィンドウにプレイヤーが入ると
-       急激にサイズが変わる）。常に「前回この関数を適用した時点」からの
-       差分だけを積み重ねる方式に統一することで、いつ入ってきても連続的な
-       変化になる。
+    /* lastAppliedParentRectがまだこのwindowIndexについて確立されていない
+       場合（プレイヤーが初めてこの親に入った、またはリサイズ中の親と
+       その子ウィンドウの間を行き来した直後）は、現在のサイズ・位置・
+       親矩形をこの場でベースラインとして確立するだけにとどめ、今フレーム
+       でのスケール適用は行わない。もしここでジェスチャー開始時点の矩形
+       (oldRect)を基準にスケールを適用してしまうと、プレイヤーが既にある
+       程度リサイズが進行した状態のウィンドウへ途中から入ってきた場合、
+       「ジェスチャー開始時点からずっとそこにいたかのような」倍率が入った
+       瞬間に一気に掛かってしまい、サイズ・位置が瞬間的に大きくジャンプ
+       してしまう（実際に報告された不具合: あらかじめリサイズしておいた
+       ウィンドウにプレイヤーが入ると急激にサイズが変わる）。常に「前回
+       この関数を適用した時点」からの差分だけを積み重ねる方式に統一する
+       ことで、いつ入ってきても連続的な変化になる。
 
        ただし、この基準はまだ一度もこの部屋の床に接地していない（空中で
        入ってきた直後の）状態で確立してはいけない: ジャンプ中/落下中の
@@ -627,18 +625,20 @@ void Player_ApplyParentRelativeTransform(Player *p, int windowIndex, RECT newRec
        リサイズ中の相対位置追従が効かなくなってしまう（別途報告された
        不具合）。
 
-       g_resizeGenerationが変わらないままparentIdxだけが切り替わる場合
-       （リサイズ中の親ウィンドウとその子ウィンドウの間をプレイヤーが
-       行き来した場合）も同様に再確立が必要 -- lastAppliedParentIdxが
-       windowIndexと一致しない場合はlastAppliedParentRectが別のウィンドウの
-       矩形のままなので、origSizeGenの世代比較だけに頼ると前の親の矩形を
-       基準にした差分がそのまま新しい親の矩形へ誤って適用されてしまい、
-       位置・サイズが唐突に変化する不具合が起きる（実際に報告された不具合）。 */
-    if (p->origSizeGen != g_resizeGeneration || p->lastAppliedParentIdx != windowIndex)
+       windowIndexが既に確立済み（プレイヤーがこの部屋にずっと居続けている）
+       であれば、新しいリサイズジェスチャーが始まってもここで基準を作り
+       直さない -- 以前はg_resizeGenerationが変わるたびに強制的に再確立
+       していたため、ジェスチャー最初の1フレームだけスケールが一切適用
+       されず、そのフレームで一気に大きく縮んだ（マウスを素早くドラッグ
+       した）場合にプレイヤーだけ取り残されて床をすり抜けてしまう不具合が
+       あった（実際に報告された不具合: リサイズウィンドウに入っていると
+       プレイヤーがすり抜ける）。lastAppliedParentRectは同じ部屋にいる限り
+       常に最新の状態に更新され続けるため、世代をまたいでもそのまま基準
+       として使い続けて問題ない。 */
+    if (p->lastAppliedParentIdx != windowIndex)
     {
         if (!p->grounded)
             return;
-        p->origSizeGen = g_resizeGeneration;
         p->lastAppliedParentIdx = windowIndex;
         p->lastAppliedParentRect = newRect;
         return;

@@ -7,7 +7,6 @@
 typedef struct {
     float x, y;   /* 左上座標、スクリーン座標系（滑らかな物理演算のためfloat） */
     int width, height; /* 現在のサイズ -- 可変: リサイズされる親に合わせてスケーリングされる */
-    int origSizeGen; /* lastAppliedParentRect が最後に確定した時点の g_resizeGeneration の値 */
     /* Player_ApplyParentRelativeTransform専用: 直近にこの関数を適用した時点の
        親の可視矩形。サイズ・位置ともに、ジェスチャー開始時点ではなくこちらを
        フレームごとの基準にする -- そうしないと、(1)リサイズ中にプレイヤー
@@ -20,13 +19,11 @@ typedef struct {
        入ってきても連続的なリサイズ追従を両立させる。 */
     RECT lastAppliedParentRect;
     /* lastAppliedParentRect がどのウィンドウ（インデックス）についての
-       ものかを記録する。リサイズ中の親ウィンドウとその子ウィンドウとの
-       間をプレイヤーが行き来すると、g_resizeGeneration は同じジェスチャー
-       のまま親だけが切り替わるため、origSizeGenの世代比較だけでは
-       「新しい親に対するベースラインをまだ確立していない」ことを検出
-       できず、前の親の矩形を基準にした差分計算が別のウィンドウの矩形へ
-       誤って適用され、位置・サイズが唐突に変化する不具合が起きる
-       （Player_ApplyParentRelativeTransform参照）。 */
+       ものかを記録する。この値が現在の親と一致する限り、新しいリサイズ
+       ジェスチャーが始まってもlastAppliedParentRectを破棄せず引き続き基準
+       として使う -- 一致しない場合（プレイヤーが行き来した、または初めて
+       この親に入った）のみ、現在の矩形をその場で新しい基準として確立し
+       直す（Player_ApplyParentRelativeTransform参照）。 */
     int lastAppliedParentIdx;
     float vy;
     int grounded;
