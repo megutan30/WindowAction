@@ -245,6 +245,29 @@ static void Editor_CommitPending(void)
     }
 }
 
+/* パレットから1個取り出す（ドラッグを開始する）瞬間に、同じ種別のアイコンを
+   ホームポジションへ複製しておく。そうしないと1回配置するたびにそのマスが
+   空になり、同じ種別を続けて何度も置きたい場合にいちいちパレット全体を
+   作り直す（Resetする）羽目になる -- 実際に配置作業がやりにくいと報告された。
+   ドラッグ/配置待ち/確定の一連の処理は元のindexをそのまま辿り続けるので、
+   ここで作る複製は一切それらに関与させず、単にホームポジションに留まる
+   新しいWT_BTN_PALETTEインスタンスとして存在するだけでよい。 */
+static void RespawnPaletteIcon(const GameWindowData *src)
+{
+    int idx = CreateGameWindowIndexed(g_hInstance, WT_BTN_PALETTE,
+                                       src->paletteHomePos.x, src->paletteHomePos.y,
+                                       src->paletteIconSize.cx, src->paletteIconSize.cy,
+                                       src->text);
+    if (idx < 0)
+        return;
+    g_windows[idx].paletteKind = src->paletteKind;
+    g_windows[idx].paletteIsNoEntry = src->paletteIsNoEntry;
+    g_windows[idx].paletteIsZone = src->paletteIsZone;
+    g_windows[idx].paletteHomePos = src->paletteHomePos;
+    g_windows[idx].paletteIconSize = src->paletteIconSize;
+    g_windows[idx].isEditorChrome = 1;
+}
+
 void Editor_StartPaletteDrag(int index)
 {
     GameWindowData *d = GetWindowData(index);
@@ -275,6 +298,8 @@ void Editor_StartPaletteDrag(int index)
        場合、前のものを宙ぶらりんにせず自動的にその時点の大きさで確定する。 */
     if (g_pendingIndex >= 0)
         Editor_CommitPending();
+
+    RespawnPaletteIcon(d);
 
     d->paletteDragging = 1;
     SetCapture(d->hwnd);

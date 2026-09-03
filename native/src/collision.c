@@ -73,6 +73,15 @@ static int GatherObstacles(CollisionOptions opts, RECT *out, int maxOut)
         GameWindowData *d = &g_windows[i];
         if (!d->hwnd || d->minimized)
             continue;
+#ifdef ENABLE_STAGE_EDITOR
+        /* パレットアイコン/ツールバーボタン等のエディター自身のUI要素は、
+           テストステージに配置したウィンドウの障害物として扱わない --
+           そうしないと不可侵ウィンドウ等をパレット付近に動かした際に、
+           見た目上は無関係なエディターUIに衝突判定でぶつかって止まって
+           しまい、パレット周辺での配置・移動がやりにくくなる。 */
+        if (d->isEditorChrome)
+            continue;
+#endif
 
         if (d->isNoEntry)
         {

@@ -216,6 +216,16 @@ void Button_UpdateParent(void)
         GameWindowData *btn = &g_windows[i];
         if (!IsButtonKind(btn->kind) || !btn->hwnd || btn->minimized)
             continue;
+#ifdef ENABLE_STAGE_EDITOR
+        /* パレットアイコン/ツールバーボタンはエディター画面上の固定UIであり、
+           テストステージ側に配置した（親候補になり得る）ウィンドウの子には
+           ならない -- そうしないと、配置したウィンドウがパレットの上に
+           重なっただけでパレットがその子になってしまい、位置がその
+           ウィンドウの移動に引きずられて動いてしまう（実際に報告された
+           不具合）。 */
+        if (btn->isEditorChrome)
+            continue;
+#endif
 
         RECT bb;
         GetWindowFullBounds(btn->hwnd, &bb);
