@@ -111,6 +111,20 @@ void NoEntry_ResetZones(void)
     g_noEntryZoneCount = 0;
 }
 
+void NoEntry_RemoveZone(int index)
+{
+    if (index < 0 || index >= g_noEntryZoneCount)
+        return;
+    if (g_zoneHwnd[index])
+        DestroyWindow(g_zoneHwnd[index]);
+    for (int i = index; i < g_noEntryZoneCount - 1; i++)
+    {
+        g_noEntryZones[i] = g_noEntryZones[i + 1];
+        g_zoneHwnd[i] = g_zoneHwnd[i + 1];
+    }
+    g_noEntryZoneCount--;
+}
+
 void NoEntry_UpdateAnimation(float dt)
 {
     const float SPEED = 40.0f; /* px/sec、現行のOutlineRendererと一致 */

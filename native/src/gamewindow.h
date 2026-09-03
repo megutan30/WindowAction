@@ -146,12 +146,29 @@ typedef struct {
        paletteKindがNoEntry系かどうか（アイコンに縞模様枠を描くかの判定用、
        GetKindAppearanceの結果をEditor_LoadTestStageで一度だけ計算して
        キャッシュしておく）。paletteIconSizeはドラッグしていない時の
-       アイコンサイズ、ドラッグ中はEDITOR_DEFAULT_SIZE相当まで拡大される。 */
+       アイコンサイズ、ドラッグ中はEDITOR_DEFAULT_SIZE相当まで拡大される。
+       paletteIsZoneは、このアイコンが実際にはGameWindowではなく静的
+       NoEntryZone（NoEntry_AddZone、矩形+クリックスルーの縞模様マーカー）を
+       配置するための特殊なパレット項目であることを示す -- trueの場合、
+       paletteKindは見た目（背景色/縞模様枠）を借りるためだけに使われ、
+       ドロップ時にCreateGameWindowIndexedではなくNoEntry_AddZoneが
+       呼ばれる（Editor_EndPaletteDrag参照）。 */
     WindowKind paletteKind;
     int paletteIsNoEntry;
+    int paletteIsZone;
     POINT paletteHomePos;
     SIZE paletteIconSize;
     int paletteDragging;
+
+    /* このウィンドウがエディター自身のUI要素（パレットアイコン/ツールバー
+       ボタン）であり、ユーザーが「配置した」ものではないことを示す。
+       WT_BTN_TOTITLE等、実ゲームプレイでも使う種別をツールバーの固定
+       ナビゲーションボタンとパレットからの配置可能項目の両方に使い回す
+       ため、kindだけでは区別できない -- Editor_ExportStage（書き出し対象
+       から除外）とEditor_HandleDeleteInput（削除対象から除外）はこの
+       フラグを見る。CreateGameWindowIndexedのZeroMemoryにより、通常の
+       配置（ドラッグ&ドロップ）で生成されたウィンドウでは常に0のまま。 */
+    int isEditorChrome;
 #endif
 } GameWindowData;
 

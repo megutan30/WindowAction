@@ -20,6 +20,12 @@ void NoEntry_UpdateAnimation(float dt);
    ステージロードのたびにResetWindowRegistryから呼び出す。 */
 void NoEntry_ResetZones(void);
 
+/* index番目のゾーン1つだけを取り除く（可視マーカーウィンドウの破棄+配列の
+   詰め直し）。NoEntry_ResetZonesとは異なり全消去ではなく、ステージエディター
+   でのDeleteキーによる個別削除用（Editor_HandleDeleteInput参照）。範囲外の
+   indexを渡しても安全（何もしない）。 */
+void NoEntry_RemoveZone(int index);
+
 /* NoEntryフラグ付きウィンドウの4方向の境界帯矩形（上下左右、幅5px）を
    out[4]に書き込む。ウィンドウがNoEntryでなければ0を返す。 */
 int NoEntry_GetBoundaryRects(int windowIndex, RECT out[4]);

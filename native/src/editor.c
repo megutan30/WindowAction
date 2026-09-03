@@ -4,6 +4,7 @@
 
 #include "player.h"
 #include "hierarchy.h"
+#include "noentry.h"
 #include <stdio.h>
 
 int g_requestTest = 0;
@@ -24,6 +25,12 @@ int g_requestTest = 0;
 #define TOOLBAR_BTN_H 34
 #define TOOLBAR_GAP 4
 
+/* ドロップ時のTitle/Retryボタンの実サイズ。stage.cのMakeButton(BTN_W/BTN_H)と
+   一致させ、実際のステージで使われるのと同じ見た目・当たり判定で試せるように
+   する（他の窓種別のような正方形EDITOR_DEFAULT_SIZEにはしない）。 */
+#define EDITOR_BTN_W 150
+#define EDITOR_BTN_H 40
+
 static int g_isTestStage = 0;
 static HINSTANCE g_hInstance = NULL;
 /* パレット+ツールバー全体を囲む矩形（Editor_LoadTestStageで一度だけ計算）。
@@ -34,10 +41,16 @@ typedef struct
 {
     WindowKind kind;
     const char *label;
+    /* trueなら、このパレット項目は実際にはGameWindowを生成しない特殊項目
+       （現状は静的NoEntryZoneのみ）。kindは見た目（背景色/縞模様枠）を
+       借りるためだけに使う。省略時（末尾の値を書かない行）はCの集成体
+       初期化規則により自動的に0になる。 */
+    int isZone;
 } PaletteEntry;
 
-/* パレットに並べる配置候補。ボタン/キャンバス自身やGoal以外の
-   「実際にステージへ置きうる」全種別を網羅する。 */
+/* パレットに並べる配置候補。ボタン/キャンバス自身以外の
+   「実際にステージへ置きうる」全種別を網羅する（Goal、Title/Retryボタン、
+   静的NoEntryZoneも含む）。 */
 static const PaletteEntry kPalette[] = {
     {WT_NORMAL_BLACK, "Normal(Blk)"},
     {WT_NORMAL_WHITE, "Normal(Wht)"},
@@ -54,6 +67,9 @@ static const PaletteEntry kPalette[] = {
     {WT_MINIMIZABLE_NOENTRY, "Mini+NoEntry"},
     {WT_UNCONSTRAINED_NOENTRY, "Unc+NoEntry"},
     {WT_GOAL, "Goal"},
+    {WT_BTN_TOTITLE, "Title Btn"},
+    {WT_BTN_RETRY, "Retry Btn"},
+    {WT_NORMAL_BLACK_NOENTRY, "NoEntry Zone", 1},
 };
 #define PALETTE_COUNT (sizeof(kPalette) / sizeof(kPalette[0]))
 
@@ -86,11 +102,13 @@ void Editor_LoadTestStage(HINSTANCE hInstance)
         if (idx >= 0)
         {
             g_windows[idx].paletteKind = kPalette[i].kind;
-            g_windows[idx].paletteIsNoEntry = WindowKind_IsNoEntry(kPalette[i].kind);
+            g_windows[idx].paletteIsNoEntry = WindowKind_IsNoEntry(kPalette[i].kind) || kPalette[i].isZone;
+            g_windows[idx].paletteIsZone = kPalette[i].isZone;
             g_windows[idx].paletteHomePos.x = x;
             g_windows[idx].paletteHomePos.y = y;
             g_windows[idx].paletteIconSize.cx = PALETTE_ICON_SIZE;
             g_windows[idx].paletteIconSize.cy = PALETTE_ICON_SIZE;
+            g_windows[idx].isEditorChrome = 1;
         }
     }
 
@@ -98,14 +116,21 @@ void Editor_LoadTestStage(HINSTANCE hInstance)
     int gridRight = PALETTE_X + PALETTE_COLS * (PALETTE_ICON_SIZE + PALETTE_GAP);
     int gridBottom = PALETTE_Y + gridRows * (PALETTE_ICON_SIZE + PALETTE_GAP);
 
-    /* ツールバー（グリッドの下に続けて配置）。 */
+    /* ツールバー（グリッドの下に続けて配置）。WT_BTN_TOTITLEはパレットからも
+       配置できる実ゲームプレイ種別と同じkindを使い回すため、isEditorChrome
+       フラグで「これはエディター自身のナビゲーションボタンであり、
+       ユーザーが配置したものではない」ことを明示しておく（そうしないと
+       Export/Deleteの対象外判定がパレット由来のTitleボタンと区別できない）。 */
     int py = gridBottom + TOOLBAR_GAP;
-    CreateGameWindow(hInstance, WT_BTN_EXPORT, PALETTE_X, py, TOOLBAR_BTN_W, TOOLBAR_BTN_H, "Export");
+    int exportIdx = CreateGameWindowIndexed(hInstance, WT_BTN_EXPORT, PALETTE_X, py, TOOLBAR_BTN_W, TOOLBAR_BTN_H, "Export");
     py += TOOLBAR_BTN_H + TOOLBAR_GAP;
-    CreateGameWindow(hInstance, WT_BTN_RESET, PALETTE_X, py, TOOLBAR_BTN_W, TOOLBAR_BTN_H, "Reset");
+    int resetIdx = CreateGameWindowIndexed(hInstance, WT_BTN_RESET, PALETTE_X, py, TOOLBAR_BTN_W, TOOLBAR_BTN_H, "Reset");
     py += TOOLBAR_BTN_H + TOOLBAR_GAP;
-    CreateGameWindow(hInstance, WT_BTN_TOTITLE, PALETTE_X, py, TOOLBAR_BTN_W, TOOLBAR_BTN_H, "Title");
+    int titleIdx = CreateGameWindowIndexed(hInstance, WT_BTN_TOTITLE, PALETTE_X, py, TOOLBAR_BTN_W, TOOLBAR_BTN_H, "Title");
     py += TOOLBAR_BTN_H;
+    if (exportIdx >= 0) g_windows[exportIdx].isEditorChrome = 1;
+    if (resetIdx >= 0) g_windows[resetIdx].isEditorChrome = 1;
+    if (titleIdx >= 0) g_windows[titleIdx].isEditorChrome = 1;
 
     g_panelBounds.left = 0;
     g_panelBounds.top = 0;
@@ -125,11 +150,17 @@ void Editor_LoadTestStage(HINSTANCE hInstance)
     }
 }
 
-/* ドラッグ中のアイコンの一辺の長さ。配置先に実際どの大きさで置かれるかが
-   一目で分かるよう、待機時の小さなアイコンではなく実配置サイズまで拡大する。 */
-static int DragFullSize(WindowKind kind)
+/* ドラッグ中のアイコンの実サイズ。配置先に実際どの大きさで置かれるかが
+   一目で分かるよう、待機時の小さなアイコンではなく実配置サイズまで拡大する。
+   Title/Retryボタンはstage.cのMakeButtonと同じ150x40、Goalは正方形の
+   EDITOR_GOAL_SIZE、それ以外（NoEntry Zoneを含む）は正方形のEDITOR_DEFAULT_SIZE。 */
+static SIZE DragFullSize(WindowKind kind)
 {
-    return (kind == WT_GOAL) ? EDITOR_GOAL_SIZE : EDITOR_DEFAULT_SIZE;
+    if (kind == WT_GOAL)
+        return (SIZE){EDITOR_GOAL_SIZE, EDITOR_GOAL_SIZE};
+    if (kind == WT_BTN_TOTITLE || kind == WT_BTN_RETRY)
+        return (SIZE){EDITOR_BTN_W, EDITOR_BTN_H};
+    return (SIZE){EDITOR_DEFAULT_SIZE, EDITOR_DEFAULT_SIZE};
 }
 
 void Editor_StartPaletteDrag(int index)
@@ -142,10 +173,10 @@ void Editor_StartPaletteDrag(int index)
 
     /* ドラッグ中は「配置されるものそのもの」を実サイズで半透明表示する
        （小さなボタンのままカーソルに追従するのではなく）。 */
-    int size = DragFullSize(d->paletteKind);
+    SIZE size = DragFullSize(d->paletteKind);
     POINT cur;
     GetCursorPos(&cur);
-    SetWindowPos(d->hwnd, NULL, cur.x - size / 2, cur.y - size / 2, size, size,
+    SetWindowPos(d->hwnd, NULL, cur.x - size.cx / 2, cur.y - size.cy / 2, size.cx, size.cy,
                  SWP_NOZORDER | SWP_NOACTIVATE);
     SetLayeredWindowAttributes(d->hwnd, 0, PALETTE_DRAG_ALPHA, LWA_ALPHA);
 }
@@ -157,11 +188,25 @@ void Editor_UpdatePaletteDrags(void)
         GameWindowData *d = &g_windows[i];
         if (d->kind != WT_BTN_PALETTE || !d->paletteDragging || !d->hwnd)
             continue;
-        int size = DragFullSize(d->paletteKind);
+        SIZE size = DragFullSize(d->paletteKind);
         POINT cur;
         GetCursorPos(&cur);
-        SetWindowPos(d->hwnd, NULL, cur.x - size / 2, cur.y - size / 2, 0, 0,
+        SetWindowPos(d->hwnd, NULL, cur.x - size.cx / 2, cur.y - size.cy / 2, 0, 0,
                      SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+}
+
+/* ドロップ時に生成するウィンドウの初期表示テキスト。TextDisplay等ほとんどの
+   種別はNULL（kind別の既定文字列に任せる）のままだが、Title/Retryボタンは
+   実際のステージ(stage.cのMakeButton呼び出し)と同じキャプションが最初から
+   付いていないと、ボタンとして何のためのものか一見して分からない。 */
+static const char *DefaultDropText(WindowKind kind)
+{
+    switch (kind)
+    {
+    case WT_BTN_TOTITLE: return "Title";
+    case WT_BTN_RETRY: return "Retry";
+    default: return NULL;
     }
 }
 
@@ -181,16 +226,28 @@ void Editor_EndPaletteDrag(int index)
                   cur.y < g_panelBounds.top || cur.y > g_panelBounds.bottom;
     if (outside)
     {
-        WindowKind kind = d->paletteKind;
-        int size = DragFullSize(kind);
-        int newIdx = CreateGameWindowIndexed(g_hInstance, kind, cur.x - size / 2, cur.y - size / 2, size, size, NULL);
-        /* WindowMessageHandler.HandleLeftButtonUpと同じく、配置直後に一度だけ
-           親子判定を行う -- そうしないとドラッグ&ドロップで置いたウィンドウは
-           他のウィンドウの中に完全に収まっていても親子付けされず、その場で
-           少し動かす（ナッジドラッグ）まで親子関係が確立しなかった
-           （実際に報告された不具合）。 */
-        if (newIdx >= 0 && IsQueryableWindow(kind))
-            Hierarchy_CheckAndUpdate(newIdx);
+        SIZE size = DragFullSize(d->paletteKind);
+        if (d->paletteIsZone)
+        {
+            /* 静的NoEntryZoneはGameWindowではないため、CreateGameWindowIndexed
+               ではなくNoEntry_AddZoneで直接追加する（クリックスルーの縞模様
+               マーカーが生成される。実ゲームプレイでの静的不可侵領域と全く
+               同じ仕組み）。 */
+            NoEntry_AddZone(g_hInstance, cur.x - size.cx / 2, cur.y - size.cy / 2, size.cx, size.cy);
+        }
+        else
+        {
+            WindowKind kind = d->paletteKind;
+            int newIdx = CreateGameWindowIndexed(g_hInstance, kind, cur.x - size.cx / 2, cur.y - size.cy / 2,
+                                                  size.cx, size.cy, DefaultDropText(kind));
+            /* WindowMessageHandler.HandleLeftButtonUpと同じく、配置直後に一度だけ
+               親子判定を行う -- そうしないとドラッグ&ドロップで置いたウィンドウは
+               他のウィンドウの中に完全に収まっていても親子付けされず、その場で
+               少し動かす（ナッジドラッグ）まで親子関係が確立しなかった
+               （実際に報告された不具合）。 */
+            if (newIdx >= 0 && IsQueryableWindow(kind))
+                Hierarchy_CheckAndUpdate(newIdx);
+        }
     }
 
     /* アイコン自身は常に元のサイズ・不透明度・ホームポジションへ戻す
@@ -221,17 +278,10 @@ static const char *WindowKindName(WindowKind kind)
     case WT_UNCONSTRAINED: return "WT_UNCONSTRAINED";
     case WT_UNCONSTRAINED_NOENTRY: return "WT_UNCONSTRAINED_NOENTRY";
     case WT_GOAL: return "WT_GOAL";
+    case WT_BTN_TOTITLE: return "WT_BTN_TOTITLE";
+    case WT_BTN_RETRY: return "WT_BTN_RETRY";
     default: return "WT_NORMAL_BLACK";
     }
-}
-
-/* エディターのUI要素自身(パレット/ツールバー)を対象から除外するための判定。
-   Editor_ExportStage（書き出し対象から除外）とEditor_HandleDeleteInput
-   （Deleteキーでの削除対象から除外）の両方で使う。 */
-static int IsEditorChromeKind(WindowKind kind)
-{
-    return kind == WT_BTN_PALETTE || kind == WT_BTN_TEST ||
-           kind == WT_BTN_EXPORT || kind == WT_BTN_RESET || kind == WT_BTN_TOTITLE;
 }
 
 void Editor_ExportStage(void)
@@ -247,7 +297,11 @@ void Editor_ExportStage(void)
     for (int i = 0; i < g_windowCount; i++)
     {
         GameWindowData *d = &g_windows[i];
-        if (!d->hwnd || IsEditorChromeKind(d->kind))
+        /* isEditorChromeはパレットアイコン/ツールバーボタン自身（ユーザーが
+           配置したものではない）を除外する -- WT_BTN_TOTITLEのようにツール
+           バーのナビゲーションボタンとパレットから配置可能な実ゲームプレイ
+           種別とでkindを使い回しているため、kindだけでは区別できない。 */
+        if (!d->hwnd || d->isEditorChrome)
             continue;
 
         RECT r;
@@ -257,9 +311,21 @@ void Editor_ExportStage(void)
 
         if (d->kind == WT_GOAL)
             fprintf(f, "        MakeGoal(h, %d, %d);\n", r.left, r.top);
+        else if (d->text[0] != '\0')
+            fprintf(f, "        CreateGameWindow(h, %s, %d, %d, %d, %d, \"%s\");\n",
+                    WindowKindName(d->kind), r.left, r.top, w, h, d->text);
         else
             fprintf(f, "        CreateGameWindow(h, %s, %d, %d, %d, %d, NULL);\n",
                     WindowKindName(d->kind), r.left, r.top, w, h);
+    }
+
+    /* 静的NoEntryZoneはg_windows[]の対象外(GameWindowではない)なので別途
+       書き出す。実際のステージコードと同じくNoEntry_AddZone呼び出し列。 */
+    for (int i = 0; i < g_noEntryZoneCount; i++)
+    {
+        RECT z = g_noEntryZones[i];
+        fprintf(f, "        NoEntry_AddZone(h, %d, %d, %d, %d);\n",
+                z.left, z.top, z.right - z.left, z.bottom - z.top);
     }
 
     fclose(f);
@@ -278,13 +344,37 @@ void Editor_HandleDeleteInput(void)
     {
         POINT cur;
         GetCursorPos(&cur);
-        HWND hit = WindowFromPoint(cur);
-        int index = FindWindowIndex(hit);
-        /* パレットアイコン/ツールバーボタン自身は削除対象から除外する --
-           これらはエディターのUIそのものであり「配置したウィンドウ」では
-           ない。それ以外は種別を問わず（Goalも含め）削除できる。 */
-        if (index >= 0 && !IsEditorChromeKind(g_windows[index].kind))
-            DeleteWindow(index);
+
+        /* 静的NoEntryZoneのマーカーはクリックスルー(WS_EX_TRANSPARENT)の
+           ためWindowFromPointでは検出できない。実ゲームプレイでも常に
+           最前面(WS_EX_TOPMOST)に縞模様が描かれる=見た目上いちばん手前に
+           あるため、まずゾーンを優先してヒットテストする。複数重なって
+           いる場合は配列の後ろ（＝後から置いた方）を優先する。 */
+        int zoneHit = -1;
+        for (int i = g_noEntryZoneCount - 1; i >= 0; i--)
+        {
+            RECT z = g_noEntryZones[i];
+            if (cur.x >= z.left && cur.x < z.right && cur.y >= z.top && cur.y < z.bottom)
+            {
+                zoneHit = i;
+                break;
+            }
+        }
+
+        if (zoneHit >= 0)
+        {
+            NoEntry_RemoveZone(zoneHit);
+        }
+        else
+        {
+            HWND hit = WindowFromPoint(cur);
+            int index = FindWindowIndex(hit);
+            /* パレットアイコン/ツールバーボタン自身は削除対象から除外する --
+               これらはエディターのUIそのものであり「配置したウィンドウ」では
+               ない。それ以外は種別を問わず（Goalも含め）削除できる。 */
+            if (index >= 0 && !g_windows[index].isEditorChrome)
+                DeleteWindow(index);
+        }
     }
     wasDown = isDown;
 }
