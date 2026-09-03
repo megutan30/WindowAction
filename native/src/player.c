@@ -613,17 +613,18 @@ void Player_ApplyParentRelativeTransform(Player *p, int windowIndex, RECT newRec
        この関数を適用した時点」からの差分だけを積み重ねる方式に統一する
        ことで、いつ入ってきても連続的な変化になる。
 
-       ただし、この基準はまだ一度もこの部屋の床に接地していない（空中で
-       入ってきた直後の）状態で確立してはいけない: ジャンプ中/落下中の
-       任意の空中位置を「部屋に対する正しい相対位置」として基準化すると、
-       重力による自然な落下と拡大縮小分の追従が二重に合成され、急激に
-       加速して一瞬で床まで落ちてしまう（実際に報告された不具合）。
-       接地するまでは基準の確立自体を保留し、着地した瞬間に初めて確立する。
-       逆に、一度接地して基準が確立された後にジャンプで一時的に空中へ
-       浮いても（下のブロックには到達せずここを素通りするだけなので）
-       追従は止めない -- そうしないと、部屋の中で普通にジャンプしただけで
-       リサイズ中の相対位置追従が効かなくなってしまう（別途報告された
-       不具合）。
+       以前はこの基準を、まだ一度もこの部屋の床に接地していない（空中で
+       入ってきた直後の）状態では確立しなかった（着地するまで保留）。しかし
+       これは「空中にいる間ずっとこの部屋のリサイズを一切追従しない」ことを
+       意味し、リサイズ中の部屋へジャンプ/落下で入った場合、着地するまでの
+       間ずっと部屋の変化から取り残され続け、実際に着地しようとする頃には
+       床が既に大きく動いてしまっていて着地に失敗し、そのまますり抜ける
+       不具合があった（実際に報告された不具合: 空中でリサイズウィンドウが
+       親になってから着地するまでの間、追従が起きていないように感じる）。
+       今は空中かどうかに関わらずこの場で基準を確立する -- スケール適用
+       自体は次のフレーム以降だけなので「今フレームの一気なジャンプ」は
+       起こらず、直後の位置クランプ（下記）で空中の任意位置がnewRectの
+       外に出ることも防げるため、着地前に確立しても安全になった。
 
        windowIndexが既に確立済み（プレイヤーがこの部屋にずっと居続けている）
        であれば、新しいリサイズジェスチャーが始まってもここで基準を作り
@@ -637,10 +638,39 @@ void Player_ApplyParentRelativeTransform(Player *p, int windowIndex, RECT newRec
        として使い続けて問題ない。 */
     if (p->lastAppliedParentIdx != windowIndex)
     {
-        if (!p->grounded)
-            return;
         p->lastAppliedParentIdx = windowIndex;
         p->lastAppliedParentRect = newRect;
+
+        /* HandleWindowTransitionsが親をwindowIndexへ切り替えるのはこの関数の
+           呼び出しより後（Strategy_UpdateAllの中でこの関数が呼ばれた時点では
+           まだ旧親のまま）なので、基準を確立できる最初の機会は実際に親が
+           切り替わってからさらに1フレーム後になる。その間もこの部屋の
+           リサイズは進み続けているため、ここで基準を確立する時点で既に
+           プレイヤーの現在位置がnewRectの外へ出てしまっていることがある
+           （特に素早くドラッグして1フレームの縮小量が大きい場合、または
+           空中にいた間ずっと追従されていなかった場合）。はみ出したままだと、
+           この直後に走るCheckGroundedが新しい床をtolerance内に見つけられず
+           接地判定を得られなくなり、「一度も接地しない → 基準を確立できない
+           （旧設計）→ 追従されない → さらにはみ出す」という連鎖で床を
+           すり抜けてしまう（実際に報告された不具合）。スケール追従はまだ
+           適用しない（それは次のフレーム以降）が、位置だけは親の現在の
+           矩形の内側へクランプしておくことで、この連鎖を断ち切る。 */
+        int clampW = p->width;
+        int clampH = p->height;
+        int maxX = newRect.right - clampW;
+        int maxY = newRect.bottom - clampH;
+        int clampedX = (int)p->x;
+        int clampedY = (int)p->y;
+        if (clampedX < newRect.left)
+            clampedX = newRect.left;
+        if (clampedX > maxX)
+            clampedX = maxX;
+        if (clampedY < newRect.top)
+            clampedY = newRect.top;
+        if (clampedY > maxY)
+            clampedY = maxY;
+        p->x = (float)clampedX;
+        p->y = (float)clampedY;
         return;
     }
 
