@@ -9,7 +9,14 @@
 
 #include <windows.h>
 
-#define MAX_WINDOWS 32
+/* テストモードのパレット+ツールバー自体が常時22枠(#ifdef ENABLE_STAGE_EDITOR
+   時点でのkPalette 19項目+ツールバー3項目、editor.c参照)を使い切ってしまう
+   ため、以前の32では実際にテストで配置できる余地が10枠しか残らず、少し
+   多めに配置しただけでCreateGameWindowIndexedが上限に達して新規ウィンドウ
+   もパレットアイコンの複製(RespawnPaletteIcon)も生成できなくなり、パレット
+   のマスが復活しなくなる不具合があった（実際に報告された不具合）。本番
+   ビルドはこのパレットを一切持たないため実質的な下限は変わらない。 */
+#define MAX_WINDOWS 64
 #define MAX_CHILDREN 8
 #define MAX_NOENTRY_ZONES 8
 #define MIN_WINDOW_SIZE 100
