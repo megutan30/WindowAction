@@ -44,4 +44,24 @@ int NoEntry_IntersectsAny(RECT bounds);
    隠れている境界の断片にプレイヤーが衝突してしまう。 */
 int NoEntry_IsRectVisibleFromWindow(int windowIndex, RECT rect);
 
+/* NoEntry_IsRectVisibleFromWindowの詳細版: 可視かどうかのboolだけでなく、
+   実際に見えている部分の外接矩形を`outBounds`(非NULL時)に書き込む。呼び出し
+   側がその後の衝突応答（移動を止める位置の計算など）に、隠れている部分も
+   含む`rect`全体ではなく実際に見えている範囲だけを使うために必要 --
+   NoEntryBoundaryCollider.CheckCollisionが返すcollisionRectと同じ役割。
+   これを使わずに元の`rect`（またはNoEntry_GetBoundaryRectsの生の境界）を
+   そのまま衝突応答に使うと、不可侵ウィンドウの境界の一部が別のウィンドウに
+   隠れている場合に、見えている/見えていない境目でプレイヤーの挙動が
+   おかしくなる（実際に報告された不具合）。 */
+int NoEntry_GetVisiblePortion(int windowIndex, RECT rect, RECT *outBounds);
+
+/* NoEntry_GetBoundaryRectsの可視性考慮版。より前面の（NoEntryに限らない）
+   ウィンドウに完全に隠されている境界帯は除外し、部分的に隠れているものは
+   可視部分の外接矩形を返す。戻り値は書き込んだ矩形の個数(0～4)。
+   GatherObstacles(collision.c)がMovable/Resizableウィンドウの移動・
+   リサイズをNoEntyウィンドウの境界と照合する際は、NoEntry_GetBoundaryRects
+   ではなく必ずこちらを使うこと -- そうしないと、実際には手前の別ウィンドウに
+   隠れている境界の断片にまで移動・リサイズが弾かれてしまう。 */
+int NoEntry_GetVisibleBoundaryRects(int windowIndex, RECT out[4]);
+
 #endif

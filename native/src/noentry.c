@@ -159,7 +159,8 @@ int NoEntry_GetBoundaryRects(int windowIndex, RECT out[4])
     return 4;
 }
 
-int NoEntry_IsRectVisibleFromWindow(int windowIndex, RECT rect)
+/* noentry.h参照。 */
+int NoEntry_GetVisiblePortion(int windowIndex, RECT rect, RECT *outBounds)
 {
     HWND hwnd = g_windows[windowIndex].hwnd;
     if (!hwnd || IsRectEmpty(&rect))
@@ -193,7 +194,43 @@ int NoEntry_IsRectVisibleFromWindow(int windowIndex, RECT rect)
     int rgnType = GetRgnBox(visible, &box);
     DeleteObject(visible);
 
-    return rgnType != NULLREGION && rgnType != ERROR;
+    if (rgnType == NULLREGION || rgnType == ERROR)
+        return 0;
+    if (outBounds)
+        *outBounds = box;
+    return 1;
+}
+
+int NoEntry_IsRectVisibleFromWindow(int windowIndex, RECT rect)
+{
+    return NoEntry_GetVisiblePortion(windowIndex, rect, NULL);
+}
+
+/* GatherObstacles(collision.c)専用: NoEntry_GetBoundaryRectsの可視性考慮版。
+   各境界帯のうち、より前面の（NoEntryに限らない）ウィンドウに完全に隠されて
+   いるものは出力から除外し、部分的に隠れているものは可視部分の外接矩形を
+   返す（NoEntryBoundaryCollider.CheckCollisionのcollisionRect計算と同じ
+   近似）。戻り値は書き込んだ矩形の個数(0～4)。
+   collision.cのGatherObstaclesは以前NoEntry_GetBoundaryRectsを直接使って
+   おり、この可視性チェックを一切経由していなかった -- そのためNoEntry
+   ウィンドウの境界の手前に別のウィンドウが重なっているだけで、実際には
+   見えていない（隠れている）はずの境界にMovable/Resizableウィンドウの
+   移動・リサイズが弾かれてしまう不具合があった（実際に報告された不具合:
+   元のC#実装と挙動が異なる、動かそうとするとはじかれる）。プレイヤーの
+   衝突判定側は元々この関数(NoEntry_IsRectVisibleFromWindow)を経由して
+   いたため影響を受けていなかった。 */
+int NoEntry_GetVisibleBoundaryRects(int windowIndex, RECT out[4])
+{
+    RECT raw[4];
+    int c = NoEntry_GetBoundaryRects(windowIndex, raw);
+    int n = 0;
+    for (int b = 0; b < c; b++)
+    {
+        RECT vis;
+        if (NoEntry_GetVisiblePortion(windowIndex, raw[b], &vis))
+            out[n++] = vis;
+    }
+    return n;
 }
 
 /* `bounds`がNoEntryウィンドウ`windowIndex`の境界の「可視」部分と重なっていれば

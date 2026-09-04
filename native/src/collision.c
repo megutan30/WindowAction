@@ -85,8 +85,15 @@ static int GatherObstacles(CollisionOptions opts, RECT *out, int maxOut)
 
         if (d->isNoEntry)
         {
+            /* NoEntry_GetBoundaryRects単体のAABBではなく、より前面の
+               ウィンドウに隠れている部分を除外したNoEntry_GetVisibleBoundaryRects
+               を使う（noentry.h参照）。以前はここが素のNoEntry_GetBoundaryRects
+               を直接使っており、NoEntryウィンドウの境界の手前に別のウィンドウが
+               重なっているだけで、実際には見えていない境界にMovable/Resizable
+               の移動・リサイズが弾かれてしまっていた（実際に報告された不具合:
+               元のC#実装と挙動が異なる）。 */
             RECT bnd[4];
-            int c = NoEntry_GetBoundaryRects(i, bnd);
+            int c = NoEntry_GetVisibleBoundaryRects(i, bnd);
             for (int b = 0; b < c && n < maxOut; b++)
                 out[n++] = bnd[b];
         }
