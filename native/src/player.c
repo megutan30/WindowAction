@@ -855,25 +855,34 @@ static void CheckHorizontalCollision(RECT bounds, float *moveX)
         {
             if (!RectsOverlap(sweep, bnd[b]))
                 continue;
+            RECT sweepPart;
+            IntersectRect(&sweepPart, &sweep, &bnd[b]);
+            /* isLeftEdge/isRightEdgeとcapの計算には、隠れている部分も含む
+               bnd[b]全体ではなく、実際に見えている部分(vis)だけを使う --
+               そうしないと、境界の一部が別のウィンドウに隠れている場合に、
+               見えている/見えていない境目で衝突応答が不可視の位置を基準に
+               計算されてしまい、プレイヤーの挙動がおかしくなる（実際に
+               報告された不具合）。PlayerPhysics.csがCheckNoEntryBoundaryCollision
+               の返すcollisionRect（見えている部分の外接矩形）だけを使うのと
+               一致させる。 */
             RECT vis;
-            IntersectRect(&vis, &sweep, &bnd[b]);
-            if (!NoEntry_IsRectVisibleFromWindow(i, vis))
-                continue; /* より前面のNoEntryウィンドウに隠れている */
-            int isLeftEdge = abs(bnd[b].left - wb.left) < (5 + width / 2 + 2);
-            int isRightEdge = abs(bnd[b].right - wb.right) < (5 + width / 2 + 2);
+            if (!NoEntry_GetVisiblePortion(i, sweepPart, &vis))
+                continue; /* 前面の何かに隠れている */
+            int isLeftEdge = abs(vis.left - wb.left) < (5 + width / 2 + 2);
+            int isRightEdge = abs(vis.right - wb.right) < (5 + width / 2 + 2);
             int inside = bounds.left >= wb.left && bounds.right <= wb.right &&
                          bounds.top >= wb.top && bounds.bottom <= wb.bottom;
             if (inside)
             {
                 if (dir > 0 && isRightEdge)
                 {
-                    float cap = (float)(bnd[b].left - width - bounds.left);
+                    float cap = (float)(vis.left - width - bounds.left);
                     if (*moveX > cap)
                         *moveX = cap;
                 }
                 else if (dir < 0 && isLeftEdge)
                 {
-                    float cap = (float)(bnd[b].right - bounds.left);
+                    float cap = (float)(vis.right - bounds.left);
                     if (*moveX < cap)
                         *moveX = cap;
                 }
@@ -882,13 +891,13 @@ static void CheckHorizontalCollision(RECT bounds, float *moveX)
             {
                 if (dir > 0 && isLeftEdge)
                 {
-                    float cap = (float)(bnd[b].left - width - bounds.left);
+                    float cap = (float)(vis.left - width - bounds.left);
                     if (*moveX > cap)
                         *moveX = cap;
                 }
                 else if (dir < 0 && isRightEdge)
                 {
-                    float cap = (float)(bnd[b].right - bounds.left);
+                    float cap = (float)(vis.right - bounds.left);
                     if (*moveX < cap)
                         *moveX = cap;
                 }
@@ -945,25 +954,28 @@ static void CheckVerticalCollision(RECT bounds, float *moveY, int *hitCeiling, i
         {
             if (!RectsOverlap(sweep, bnd[b]))
                 continue;
+            RECT sweepPart;
+            IntersectRect(&sweepPart, &sweep, &bnd[b]);
+            /* CheckHorizontalCollisionと同じ理由で、隠れている部分も含む
+               bnd[b]全体ではなく実際に見えている部分(vis)だけを使う。 */
             RECT vis;
-            IntersectRect(&vis, &sweep, &bnd[b]);
-            if (!NoEntry_IsRectVisibleFromWindow(i, vis))
-                continue; /* より前面のNoEntryウィンドウに隠れている */
-            int isTopEdge = abs(bnd[b].top - wb.top) < (5 + height / 2 + 2);
-            int isBottomEdge = abs(bnd[b].bottom - wb.bottom) < (5 + height / 2 + 2);
+            if (!NoEntry_GetVisiblePortion(i, sweepPart, &vis))
+                continue; /* 前面の何かに隠れている */
+            int isTopEdge = abs(vis.top - wb.top) < (5 + height / 2 + 2);
+            int isBottomEdge = abs(vis.bottom - wb.bottom) < (5 + height / 2 + 2);
             int inside = bounds.left >= wb.left && bounds.right <= wb.right &&
                          bounds.top >= wb.top && bounds.bottom <= wb.bottom;
             if (inside)
             {
                 if (dir > 0 && isBottomEdge)
                 {
-                    float cap = (float)(bnd[b].top - height - bounds.top);
+                    float cap = (float)(vis.top - height - bounds.top);
                     if (*moveY > cap)
                         *moveY = cap;
                 }
                 else if (dir < 0 && isTopEdge)
                 {
-                    float cap = (float)(bnd[b].bottom - bounds.top);
+                    float cap = (float)(vis.bottom - bounds.top);
                     if (*moveY < cap)
                         *moveY = cap;
                 }
@@ -972,13 +984,13 @@ static void CheckVerticalCollision(RECT bounds, float *moveY, int *hitCeiling, i
             {
                 if (dir > 0 && isTopEdge)
                 {
-                    float cap = (float)(bnd[b].top - height - bounds.top);
+                    float cap = (float)(vis.top - height - bounds.top);
                     if (*moveY > cap)
                         *moveY = cap;
                 }
                 else if (dir < 0 && isBottomEdge)
                 {
-                    float cap = (float)(bnd[b].bottom - bounds.top);
+                    float cap = (float)(vis.bottom - bounds.top);
                     if (*moveY < cap)
                         *moveY = cap;
                 }
@@ -1310,15 +1322,22 @@ static void CheckGroundedNormal(Player *p, float dt)
             RECT band = bnd[b];
             if (!RectsOverlap(sweep, band))
                 continue;
+            RECT sweepPart;
+            IntersectRect(&sweepPart, &sweep, &band);
+            /* CheckHorizontalCollisionと同じ理由で、隠れている部分も含む
+               band全体ではなく実際に見えている部分(visBand)を床として使う
+               -- そうしないと、境界の一部が別のウィンドウに隠れている場合に
+               見えていない位置に着地してしまう（実際に報告された不具合）。
+               PlayerPhysics.csがCheckNoEntryBoundaryCollisionの返す
+               collisionRectのTopをgroundYに使うのと一致させる。 */
             RECT visBand;
-            IntersectRect(&visBand, &sweep, &band);
-            if (!NoEntry_IsRectVisibleFromWindow(i, visBand))
+            if (!NoEntry_GetVisiblePortion(i, sweepPart, &visBand))
                 continue; /* より前面のウィンドウに隠れている */
-            if (playerBottom >= band.top && playerBottom <= band.top + 5 &&
-                playerRight > band.left && playerLeft < band.right)
+            if (playerBottom >= visBand.top && playerBottom <= visBand.top + 5 &&
+                playerRight > visBand.left && playerLeft < visBand.right)
             {
                 p->grounded = 1;
-                p->y = (float)(band.top - p->height);
+                p->y = (float)(visBand.top - p->height);
                 p->vy = 0.0f;
                 return;
             }
@@ -1525,15 +1544,18 @@ static void CheckGroundedInverted(Player *p, float dt)
             RECT band = bnd[b];
             if (!RectsOverlap(sweep, band))
                 continue;
+            /* CheckGroundedNormalと同じ理由で、隠れている部分も含むband全体
+               ではなく実際に見えている部分(visBand)を天井/床として使う。 */
+            RECT sweepPart;
+            IntersectRect(&sweepPart, &sweep, &band);
             RECT visBand;
-            IntersectRect(&visBand, &sweep, &band);
-            if (!NoEntry_IsRectVisibleFromWindow(i, visBand))
+            if (!NoEntry_GetVisiblePortion(i, sweepPart, &visBand))
                 continue; /* より前面のウィンドウに隠れている */
-            if (playerTop <= band.bottom && playerTop >= band.bottom - 5 &&
-                playerRight > band.left && playerLeft < band.right)
+            if (playerTop <= visBand.bottom && playerTop >= visBand.bottom - 5 &&
+                playerRight > visBand.left && playerLeft < visBand.right)
             {
                 p->grounded = 1;
-                p->y = (float)band.bottom;
+                p->y = (float)visBand.bottom;
                 p->vy = 0.0f;
                 return;
             }
