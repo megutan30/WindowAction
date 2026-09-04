@@ -5,7 +5,9 @@
 #include "player.h"
 #include "hierarchy.h"
 #include "noentry.h"
+#include "zorder.h"
 #include <stdio.h>
+#include <stdlib.h>
 
 int g_requestTest = 0;
 
@@ -56,15 +58,19 @@ typedef struct
     WindowKind kind;
     const char *label;
     /* trueなら、このパレット項目は実際にはGameWindowを生成しない特殊項目
-       （現状は静的NoEntryZoneのみ）。kindは見た目（背景色/縞模様枠）を
-       借りるためだけに使う。省略時（末尾の値を書かない行）はCの集成体
-       初期化規則により自動的に0になる。 */
+       （静的NoEntryZone、またはプレイヤー開始位置）。kindは見た目（背景色/
+       縞模様枠）を借りるためだけに使う。省略時（末尾の値を書かない行）は
+       Cの集成体初期化規則により自動的に0になる。 */
     int isZone;
+    /* trueなら、この項目はGameWindow/NoEntryZoneのどちらでもなく、ドロップ
+       位置を新しいプレイヤー開始位置として使う特殊項目（isPlayerStart、
+       Editor_CommitPending参照）。 */
+    int isPlayerStart;
 } PaletteEntry;
 
 /* パレットに並べる配置候補。ボタン/キャンバス自身以外の
    「実際にステージへ置きうる」全種別を網羅する（Goal、Title/Retryボタン、
-   静的NoEntryZoneも含む）。 */
+   静的NoEntryZone、プレイヤー開始位置も含む）。 */
 static const PaletteEntry kPalette[] = {
     {WT_NORMAL_BLACK, "Normal(Blk)"},
     {WT_NORMAL_WHITE, "Normal(Wht)"},
@@ -83,7 +89,8 @@ static const PaletteEntry kPalette[] = {
     {WT_GOAL, "Goal"},
     {WT_BTN_TOTITLE, "Title Btn"},
     {WT_BTN_RETRY, "Retry Btn"},
-    {WT_NORMAL_BLACK_NOENTRY, "NoEntry Zone", 1},
+    {WT_NORMAL_BLACK_NOENTRY, "NoEntry Zone", 1, 0},
+    {WT_MOVABLE, "Player", 0, 1},
 };
 #define PALETTE_COUNT (sizeof(kPalette) / sizeof(kPalette[0]))
 
@@ -123,6 +130,7 @@ void Editor_LoadTestStage(HINSTANCE hInstance)
             g_windows[idx].paletteKind = kPalette[i].kind;
             g_windows[idx].paletteIsNoEntry = WindowKind_IsNoEntry(kPalette[i].kind) || kPalette[i].isZone;
             g_windows[idx].paletteIsZone = kPalette[i].isZone;
+            g_windows[idx].paletteIsPlayerStart = kPalette[i].isPlayerStart;
             g_windows[idx].paletteHomePos.x = x;
             g_windows[idx].paletteHomePos.y = y;
             g_windows[idx].paletteIconSize.cx = PALETTE_ICON_SIZE;
@@ -172,9 +180,12 @@ void Editor_LoadTestStage(HINSTANCE hInstance)
 /* ドラッグ中のアイコンの実サイズ。配置先に実際どの大きさで置かれるかが
    一目で分かるよう、待機時の小さなアイコンではなく実配置サイズまで拡大する。
    Title/Retryボタンはstage.cのMakeButtonと同じ150x40、Goalは正方形の
-   EDITOR_GOAL_SIZE、それ以外（NoEntry Zoneを含む）は正方形のEDITOR_DEFAULT_SIZE。 */
-static SIZE DragFullSize(WindowKind kind)
+   EDITOR_GOAL_SIZE、プレイヤー開始位置は実際のプレイヤーと同じPLAYER_SIZE、
+   それ以外（NoEntry Zoneを含む）は正方形のEDITOR_DEFAULT_SIZE。 */
+static SIZE DragFullSize(WindowKind kind, int isPlayerStart)
 {
+    if (isPlayerStart)
+        return (SIZE){PLAYER_SIZE, PLAYER_SIZE};
     if (kind == WT_GOAL)
         return (SIZE){EDITOR_GOAL_SIZE, EDITOR_GOAL_SIZE};
     if (kind == WT_BTN_TOTITLE || kind == WT_BTN_RETRY)
@@ -222,11 +233,25 @@ static void Editor_CommitPending(void)
     int x = r.left, y = r.top;
     int w = r.right - r.left, h = r.bottom - r.top;
     int isZone = d->paletteIsZone;
+    int isPlayerStart = d->paletteIsPlayerStart;
     WindowKind kind = d->paletteKind;
 
     DeleteWindow(committedIndex);
 
-    if (isZone)
+    if (isPlayerStart)
+    {
+        /* プレイヤーはGameWindowでもNoEntryZoneでもなく、g_playerという
+           シングルトンとして既に存在している -- ここではその位置をドロップ
+           位置へ再確立するだけでよい。角ドラッグを無効化しているためw/hは
+           常にPLAYER_SIZEのまま（Editor_StartPaletteDrag参照）。 */
+        Player *p = Player_GetActive();
+        if (p)
+        {
+            Player_Reset(p, x, y);
+            Player_AssignInitialParent(p);
+        }
+    }
+    else if (isZone)
     {
         /* 静的NoEntryZoneはGameWindowではないため、CreateGameWindowIndexed
            ではなくNoEntry_AddZoneで直接追加する（クリックスルーの縞模様
@@ -265,6 +290,7 @@ static void RespawnPaletteIcon(const GameWindowData *src)
     g_windows[idx].paletteKind = src->paletteKind;
     g_windows[idx].paletteIsNoEntry = src->paletteIsNoEntry;
     g_windows[idx].paletteIsZone = src->paletteIsZone;
+    g_windows[idx].paletteIsPlayerStart = src->paletteIsPlayerStart;
     g_windows[idx].paletteHomePos = src->paletteHomePos;
     g_windows[idx].paletteIconSize = src->paletteIconSize;
     g_windows[idx].isEditorChrome = 1;
@@ -286,7 +312,11 @@ void Editor_StartPaletteDrag(int index)
         GetWindowRect(d->hwnd, &r);
         POINT cur;
         GetCursorPos(&cur);
-        int inCorner = cur.x >= r.right - PENDING_RESIZE_HANDLE && cur.x <= r.right &&
+        /* プレイヤー開始位置はサイズ調整の概念が無い（実際のプレイヤーは
+           常にPLAYER_SIZE固定）ため、角のリサイズ判定自体を無効化し、
+           常に位置移動ジェスチャーのみにする。 */
+        int inCorner = !d->paletteIsPlayerStart &&
+                        cur.x >= r.right - PENDING_RESIZE_HANDLE && cur.x <= r.right &&
                         cur.y >= r.bottom - PENDING_RESIZE_HANDLE && cur.y <= r.bottom;
 
         d->pendingGesture = inCorner ? 2 : 1;
@@ -309,7 +339,7 @@ void Editor_StartPaletteDrag(int index)
     /* ドラッグ中は「配置されるものそのもの」を実サイズで半透明表示する
        （小さなボタンのままカーソルに追従するのではなく）。この時点での
        サイズはあくまで既定値 -- ドロップ後、角ドラッグで自由に調整できる。 */
-    SIZE size = DragFullSize(d->paletteKind);
+    SIZE size = DragFullSize(d->paletteKind, d->paletteIsPlayerStart);
     POINT cur;
     GetCursorPos(&cur);
     SetWindowPos(d->hwnd, NULL, cur.x - size.cx / 2, cur.y - size.cy / 2, size.cx, size.cy,
@@ -359,7 +389,7 @@ void Editor_UpdatePaletteDrags(void)
         GameWindowData *d = &g_windows[i];
         if (d->kind != WT_BTN_PALETTE || !d->paletteDragging || !d->hwnd)
             continue;
-        SIZE size = DragFullSize(d->paletteKind);
+        SIZE size = DragFullSize(d->paletteKind, d->paletteIsPlayerStart);
         POINT cur;
         GetCursorPos(&cur);
         SetWindowPos(d->hwnd, NULL, cur.x - size.cx / 2, cur.y - size.cy / 2, 0, 0,
@@ -445,6 +475,14 @@ static const char *WindowKindName(WindowKind kind)
     }
 }
 
+/* qsort comparator: sort g_windows[] indices by current Z-order (back to front). */
+static int CompareByZOrder(const void *pa, const void *pb)
+{
+    int ia = *(const int *)pa;
+    int ib = *(const int *)pb;
+    return ZOrder_GetIndex(g_windows[ia].hwnd) - ZOrder_GetIndex(g_windows[ib].hwnd);
+}
+
 void Editor_ExportStage(void)
 {
     FILE *f = fopen("stage_export.txt", "w");
@@ -455,6 +493,11 @@ void Editor_ExportStage(void)
                "   目的の case へそのまま貼り付け可能。座標/サイズは配置時点の実際の\n"
                "   ウィンドウ矩形(GetWindowRect)から取得している。 */\n");
 
+    /* Export in current Z-order (not creation order) since the user may have
+       clicked windows to front during testing; parent detection prefers the
+       frontmost candidate, so this keeps the re-created hierarchy consistent. */
+    int order[MAX_WINDOWS];
+    int orderCount = 0;
     for (int i = 0; i < g_windowCount; i++)
     {
         GameWindowData *d = &g_windows[i];
@@ -464,6 +507,13 @@ void Editor_ExportStage(void)
            種別とでkindを使い回しているため、kindだけでは区別できない。 */
         if (!d->hwnd || d->isEditorChrome)
             continue;
+        order[orderCount++] = i;
+    }
+    qsort(order, orderCount, sizeof(int), CompareByZOrder);
+
+    for (int oi = 0; oi < orderCount; oi++)
+    {
+        GameWindowData *d = &g_windows[order[oi]];
 
         RECT r;
         GetWindowRect(d->hwnd, &r);
@@ -471,7 +521,16 @@ void Editor_ExportStage(void)
         int h = r.bottom - r.top;
 
         if (d->kind == WT_GOAL)
+        {
+            /* stage.cのMakeGoalヘルパーはx/yしか受け取らず、サイズは常に
+               固定のGOAL_SIZE(64x64)になる -- テストモードでGoalを既定
+               サイズから変更していても、その大きさはこの呼び出し形式では
+               再現できない。気づかず貼り付けてしまわないよう警告を残す。 */
+            if (w != 64 || h != 64)
+                fprintf(f, "        /* 警告: このGoalは%dx%dにリサイズされていましたが、MakeGoalはサイズを指定できないため64x64で貼り付けられます。 */\n",
+                        w, h);
             fprintf(f, "        MakeGoal(h, %d, %d);\n", r.left, r.top);
+        }
         else if (d->text[0] != '\0')
             fprintf(f, "        CreateGameWindow(h, %s, %d, %d, %d, %d, \"%s\");\n",
                     WindowKindName(d->kind), r.left, r.top, w, h, d->text);
@@ -487,6 +546,19 @@ void Editor_ExportStage(void)
         RECT z = g_noEntryZones[i];
         fprintf(f, "        NoEntry_AddZone(h, %d, %d, %d, %d);\n",
                 z.left, z.top, z.right - z.left, z.bottom - z.top);
+    }
+
+    /* プレイヤーもg_windows[]の対象外なので別途書き出す。stage.cの各stage
+       caseがg_playerStartX/Yへ直接代入しているのと同じ形式 -- テストモードで
+       パレットからプレイヤーの位置を動かして確定した現在位置をそのまま
+       貼り付けられる。 */
+    Player *p = Player_GetActive();
+    if (p)
+    {
+        RECT pb;
+        Player_GetBounds(p, &pb);
+        fprintf(f, "        g_playerStartX = %d;\n", pb.left);
+        fprintf(f, "        g_playerStartY = %d;\n", pb.top);
     }
 
     fclose(f);

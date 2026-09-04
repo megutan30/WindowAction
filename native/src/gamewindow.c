@@ -658,8 +658,13 @@ static void PaintGameWindow(HWND hwnd, int index)
 #ifdef ENABLE_STAGE_EDITOR
     case WT_BTN_PALETTE:
         /* パレットアイコンは「配置される実際の種別」のマークをそのまま表示する
-           （灰色ボタンに文字ラベルだけ、ではなく一目で分かるようにする）。 */
-        DrawKindMark(memDC, contentRc, data->paletteKind, RGB(255, 255, 255));
+           （灰色ボタンに文字ラベルだけ、ではなく一目で分かるようにする）。
+           プレイヤー開始位置はpaletteKindを見た目の背景色を借りるためだけに
+           使っており実際にはその種別のウィンドウを配置しないため、紛らわしい
+           種別マーク（Movableの矢印等）は描かず、テキストラベル"Player"のみに
+           する。 */
+        if (!data->paletteIsPlayerStart)
+            DrawKindMark(memDC, contentRc, data->paletteKind, RGB(255, 255, 255));
         if (data->paletteIsNoEntry)
             DrawClockwiseStripeBorder(memDC, rc, data->stripeOffset);
         break;

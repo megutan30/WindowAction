@@ -169,10 +169,14 @@ typedef struct {
        配置するための特殊なパレット項目であることを示す -- trueの場合、
        paletteKindは見た目（背景色/縞模様枠）を借りるためだけに使われ、
        ドロップ時にCreateGameWindowIndexedではなくNoEntry_AddZoneが
-       呼ばれる（Editor_EndPaletteDrag参照）。 */
+       呼ばれる（Editor_EndPaletteDrag参照）。paletteIsPlayerStartは同様の
+       特殊項目で、GameWindow/NoEntryZoneのどちらでもなく、既存のg_player
+       （シングルトン）をドロップ位置へ移動させ、その位置を新しい初期
+       出現位置として再確立する（Editor_CommitPending参照）。 */
     WindowKind paletteKind;
     int paletteIsNoEntry;
     int paletteIsZone;
+    int paletteIsPlayerStart;
     POINT paletteHomePos;
     SIZE paletteIconSize;
     int paletteDragging;
