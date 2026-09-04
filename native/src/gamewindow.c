@@ -195,16 +195,19 @@ int FindGoalIndex(void)
    ジッター防止には必要だが、Hierarchy_ApplyRelativeTransformによる
    スケール追従は、親自身が同じminSize/maxSizeで頭打ちになっている状況で
    Goal/ボタンを親の境界ぴったりまでクランプすることがある（親も子も
-   同じ下限で縮み切った場合など）。この「ぴったり」を毎フレームその厳密な
-   基準で再評価すると、追従で正しく親の内側に収めているにもかかわらず
-   「もう内包されていない」と誤判定して親子関係を解除し続けてしまい、
-   以降Hierarchy_ApplyRelativeTransform側の追従対象からも外れてサイズ・
-   位置がその場で凍結し、親だけがさらに縮んで最終的にGoal/ボタンが
-   はみ出て見える不具合があった（実際に報告された不具合: 制限なしリサイズ
-   ウィンドウの子のとき、プレイヤーやウィンドウと違って途中で縮まなくなる）。
-   現在の親がまだ（辺の接触を許容して）内包しているならそれを優先し、
-   本当にはみ出した場合にのみWindowQuery_GetFullyContainingへフォールバック
-   する。 */
+   同じ下限で縮み切った場合など）。この「ぴったり」をその厳密な基準だけで
+   評価すると、追従で正しく親の内側に収めているにもかかわらず「もう内包
+   されていない」と誤判定して親子関係を解除し続けてしまい、以降
+   Hierarchy_ApplyRelativeTransform側の追従対象からも外れてサイズ・位置が
+   その場で凍結し、親だけがさらに縮んで最終的にGoal/ボタンがはみ出て見える
+   不具合があった（実際に報告された不具合: 制限なしリサイズウィンドウの子
+   のとき、プレイヤーやウィンドウと違って途中で縮まなくなる）。
+   呼び出し側は、通常の厳密な検索(WindowQuery_GetFullyContaining)が新しい
+   親候補を一つも見つけられなかった場合のみ、この関数で現在の親をそのまま
+   維持してよいか判定する -- 検索を丸ごとスキップしてはいけない。スキップ
+   すると、既に親を持つGoal/ボタンに別のより前面のウィンドウを重ねても
+   その新しいウィンドウへの親子付け替えが二度と起こらなくなってしまう
+   （実際に報告された不具合）。 */
 static int IsStillInclusivelyContainedByCurrentParent(int parentIdx, RECT bounds)
 {
     if (parentIdx < 0)
@@ -229,12 +232,16 @@ void Goal_UpdateParent(void)
 
     RECT gb;
     GetWindowFullBounds(goal->hwnd, &gb);
+    int newParent = WindowQuery_GetFullyContaining(gb);
 
-    if (IsStillInclusivelyContainedByCurrentParent(goal->parentIdx, gb))
+    if (newParent == goal->parentIdx)
         return;
 
-    int newParent = WindowQuery_GetFullyContaining(gb);
-    if (newParent == goal->parentIdx)
+    /* 厳密な検索では新しい親候補が見つからなかった(-1)が、現在の親がまだ
+       （辺の接触を許容する緩い基準で）内包しているなら、誤って親子関係を
+       解除しない。新しい親候補が見つかった場合はここを通らないので、
+       より前面のウィンドウへの正しい付け替えは妨げられない。 */
+    if (newParent < 0 && IsStillInclusivelyContainedByCurrentParent(goal->parentIdx, gb))
         return;
 
     if (goal->parentIdx >= 0)
@@ -263,12 +270,14 @@ void Button_UpdateParent(void)
 
         RECT bb;
         GetWindowFullBounds(btn->hwnd, &bb);
+        int newParent = WindowQuery_GetFullyContaining(bb);
 
-        if (IsStillInclusivelyContainedByCurrentParent(btn->parentIdx, bb))
+        if (newParent == btn->parentIdx)
             continue;
 
-        int newParent = WindowQuery_GetFullyContaining(bb);
-        if (newParent == btn->parentIdx)
+        /* Goal_UpdateParentと同じ理由: 厳密な検索で候補が見つからなかった
+           場合のみ、現在の親をそのまま維持してよいか判定する。 */
+        if (newParent < 0 && IsStillInclusivelyContainedByCurrentParent(btn->parentIdx, bb))
             continue;
 
         if (btn->parentIdx >= 0)
