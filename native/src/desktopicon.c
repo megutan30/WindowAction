@@ -5,17 +5,20 @@
 #endif
 #include <commctrl.h>
 
-/* ---- 可視化マーカー: NoEntry_AddZoneのゾーンマーカーと同じ仕組み
-   （透明・クリックスルー・常に最前面のポップアップに、GDIで矩形を描く）。
-   塗りつぶしはせず、実際のアイコン矩形が一目で分かるよう単色の枠線のみを
-   描画する。 ---- */
+/* ---- 可視化オーバーレイ: アイコン1個につき1枚のマーカーウィンドウを
+   作っていたが、タスクバーに表示する必要が無いにもかかわらずアイコンの
+   数だけタスクバーボタンが並んでしまっていた（実際に報告された不具合）。
+   個別ウィンドウにする理由も無いため、仮想画面全体を覆う透明・クリック
+   スルー・常に最前面の1枚のレイヤードウィンドウに統合し、そのWM_PAINTで
+   全アイコンの矩形枠をまとめて描画する。WS_EX_TOOLWINDOWでタスクバー/
+   Alt+Tabからも確実に除外する。 ---- */
 
-static const char *kMarkerWindowClass = "WA_DesktopIconMarker";
-static HWND g_markerHwnd[MAX_DESKTOP_ICONS];
+static const char *kOverlayWindowClass = "WA_DesktopIconOverlay";
+static HWND g_overlayHwnd = NULL;
 static RECT g_icons[MAX_DESKTOP_ICONS];
 static int g_iconCount = 0;
 
-static void PaintMarker(HWND hwnd)
+static void PaintOverlay(HWND hwnd)
 {
     PAINTSTRUCT ps;
     HDC hdc = BeginPaint(hwnd, &ps);
@@ -28,23 +31,37 @@ static void PaintMarker(HWND hwnd)
     FillRect(hdc, &rc, bg);
     DeleteObject(bg);
 
-    HPEN pen = CreatePen(PS_SOLID, 3, RGB(60, 220, 60));
-    HPEN oldPen = (HPEN)SelectObject(hdc, pen);
-    HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
-    Rectangle(hdc, rc.left, rc.top, rc.right, rc.bottom);
-    SelectObject(hdc, oldBrush);
-    SelectObject(hdc, oldPen);
-    DeleteObject(pen);
+    if (g_iconCount > 0)
+    {
+        HPEN pen = CreatePen(PS_SOLID, 3, RGB(60, 220, 60));
+        HPEN oldPen = (HPEN)SelectObject(hdc, pen);
+        HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
+
+        /* g_iconsはスクリーン座標だが、ウィンドウ自体が仮想画面の原点
+           (負値になり得るマルチモニタ座標)へ配置されているため、その原点
+           分を引いてクライアント座標に変換してから描画する。 */
+        int ox = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        int oy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        for (int i = 0; i < g_iconCount; i++)
+        {
+            RECT r = g_icons[i];
+            Rectangle(hdc, r.left - ox, r.top - oy, r.right - ox, r.bottom - oy);
+        }
+
+        SelectObject(hdc, oldBrush);
+        SelectObject(hdc, oldPen);
+        DeleteObject(pen);
+    }
 
     EndPaint(hwnd, &ps);
 }
 
-static LRESULT CALLBACK MarkerWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+static LRESULT CALLBACK OverlayWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     switch (msg)
     {
     case WM_PAINT:
-        PaintMarker(hwnd);
+        PaintOverlay(hwnd);
         return 0;
     case WM_ERASEBKGND:
         return 1;
@@ -56,23 +73,35 @@ void DesktopIcon_RegisterWindowClass(HINSTANCE hInstance)
 {
     WNDCLASSA wc;
     ZeroMemory(&wc, sizeof(wc));
-    wc.lpfnWndProc = MarkerWindowProc;
+    wc.lpfnWndProc = OverlayWindowProc;
     wc.hInstance = hInstance;
-    wc.lpszClassName = kMarkerWindowClass;
+    wc.lpszClassName = kOverlayWindowClass;
     wc.hCursor = LoadCursorA(NULL, (LPCSTR)IDC_ARROW);
     wc.hbrBackground = NULL;
     RegisterClassA(&wc);
+
+    int ox = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    int oy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    int cx = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    int cy = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    g_overlayHwnd = CreateWindowExA(
+        WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+        kOverlayWindowClass, "DesktopIconOverlay",
+        WS_POPUP | WS_VISIBLE,
+        ox, oy, cx, cy,
+        NULL, NULL, hInstance, NULL);
+    if (g_overlayHwnd)
+    {
+        SetLayeredWindowAttributes(g_overlayHwnd, RGB(255, 0, 255), 0, LWA_COLORKEY);
+        SetWindowPos(g_overlayHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
 }
 
 void DesktopIcon_Clear(void)
 {
-    for (int i = 0; i < g_iconCount; i++)
-    {
-        if (g_markerHwnd[i])
-            DestroyWindow(g_markerHwnd[i]);
-        g_markerHwnd[i] = NULL;
-    }
     g_iconCount = 0;
+    if (g_overlayHwnd)
+        InvalidateRect(g_overlayHwnd, NULL, TRUE);
 }
 
 int DesktopIcon_Count(void) { return g_iconCount; }
@@ -195,20 +224,10 @@ void DesktopIcon_Refresh(HINSTANCE hInstance)
 
     CloseHandle(hProcess);
 
-    for (int i = 0; i < g_iconCount; i++)
+    if (g_overlayHwnd)
     {
-        RECT r = g_icons[i];
-        HWND hwnd = CreateWindowExA(
-            WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST, kMarkerWindowClass, "DesktopIconMarker",
-            WS_POPUP | WS_VISIBLE,
-            r.left, r.top, r.right - r.left, r.bottom - r.top,
-            NULL, NULL, hInstance, NULL);
-        if (hwnd)
-        {
-            SetLayeredWindowAttributes(hwnd, RGB(255, 0, 255), 0, LWA_COLORKEY);
-            SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        }
-        g_markerHwnd[i] = hwnd;
+        SetWindowPos(g_overlayHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        InvalidateRect(g_overlayHwnd, NULL, TRUE);
     }
 }
 
@@ -302,10 +321,10 @@ static void InitShellChangeNotify(HINSTANCE hInstance)
 
     /* HWND_MESSAGEのメッセージ専用ウィンドウ -- 画面には一切表示されず、
        PostMessageで届くWM_SHNOTIFYを受け取るためだけに存在する。
-       DesktopIcon_Clear/Refreshが作り直すマーカーHWNDとは別物で、
-       プロセス生存中ずっと同じハンドルのまま存在し続ける必要がある
-       （SHChangeNotifyRegisterに渡した後にウィンドウを破棄すると
-       登録自体が無効になるため）。 */
+       DesktopIcon_Refreshのたびに内容を再描画するだけの可視化オーバーレイ
+       (g_overlayHwnd)とは別物で、プロセス生存中ずっと同じハンドルのまま
+       存在し続ける必要がある（SHChangeNotifyRegisterに渡した後にウィンドウ
+       を破棄すると登録自体が無効になるため）。 */
     g_notifyHwnd = CreateWindowExA(0, kNotifyWindowClass, "", 0, 0, 0, 0, 0,
                                     HWND_MESSAGE, NULL, hInstance, NULL);
     if (!g_notifyHwnd)
