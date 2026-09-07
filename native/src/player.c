@@ -16,6 +16,18 @@
 #define JUMP_FORCE 1100.0f
 #define GROUND_CHECK_H 15
 
+/* 以下、CheckHorizontalCollision/CheckVerticalCollisionとCheckGroundedNormal/
+   CheckGroundedInvertedの両方で繰り返し使われている許容量。値は元々どちらも
+   同じリテラル5だったが、役割が異なる（前者は「NoEntry境界の端に近いか」の
+   判定式の一部、後者は「足元/頭が接触面にどれだけ近ければ接地/接触とみなすか」
+   の対称バンド幅）ため、意味ごとに別の定数として分けている。 */
+#define EDGE_TOLERANCE_MARGIN 5   /* 端判定式 (EDGE_TOLERANCE_MARGIN + 半径 + EDGE_TOLERANCE_EXTRA) の固定マージン */
+#define EDGE_TOLERANCE_EXTRA 2    /* 同上、丸め誤差吸収用の追加分 */
+#define GROUND_CONTACT_TOLERANCE 5 /* 接地/天井接触とみなす許容バンド幅(px) */
+#define GROUND_SWEEP_MIN_STEP 20.0f /* 接地判定スイープの最小移動量(px)。高速落下時の判定漏れ防止 */
+#define AXIS_MOVE_DEADZONE 0.1f  /* この量未満の軸移動はNoEntry境界判定自体をスキップする不感帯 */
+#define GROUND_SAMPLE_INSET 10   /* 足元/頭のサンプリング位置を外接矩形の端から内側へ寄せるオフセット(px) */
+
 /* 前方宣言: 実体は移動可能領域ロジックの他の部分と一緒に後で定義されるが、
    Player_ApplyParentRelativeTransformが位置の再クランプのためにそれより
    前に必要とする。 */
@@ -812,7 +824,7 @@ static int GravDir(const Player *p) { return p->inheritedFlipY ? -1 : 1; }
 
 static void CheckHorizontalCollision(RECT bounds, float *moveX)
 {
-    if (fabsf(*moveX) < 0.1f)
+    if (fabsf(*moveX) < AXIS_MOVE_DEADZONE)
         return;
 
     int dir = SignOf(*moveX);
@@ -869,8 +881,8 @@ static void CheckHorizontalCollision(RECT bounds, float *moveX)
             RECT vis;
             if (!NoEntry_GetVisiblePortion(i, sweepPart, &vis))
                 continue; /* 前面の何かに隠れている */
-            int isLeftEdge = abs(vis.left - wb.left) < (5 + width / 2 + 2);
-            int isRightEdge = abs(vis.right - wb.right) < (5 + width / 2 + 2);
+            int isLeftEdge = abs(vis.left - wb.left) < (EDGE_TOLERANCE_MARGIN + width / 2 + EDGE_TOLERANCE_EXTRA);
+            int isRightEdge = abs(vis.right - wb.right) < (EDGE_TOLERANCE_MARGIN + width / 2 + EDGE_TOLERANCE_EXTRA);
             int inside = bounds.left >= wb.left && bounds.right <= wb.right &&
                          bounds.top >= wb.top && bounds.bottom <= wb.bottom;
             if (inside)
@@ -909,7 +921,7 @@ static void CheckHorizontalCollision(RECT bounds, float *moveX)
 
 static void CheckVerticalCollision(RECT bounds, float *moveY, int *hitCeiling, int gravDir)
 {
-    if (fabsf(*moveY) < 0.1f)
+    if (fabsf(*moveY) < AXIS_MOVE_DEADZONE)
         return;
 
     int dir = SignOf(*moveY);
@@ -962,8 +974,8 @@ static void CheckVerticalCollision(RECT bounds, float *moveY, int *hitCeiling, i
             RECT vis;
             if (!NoEntry_GetVisiblePortion(i, sweepPart, &vis))
                 continue; /* 前面の何かに隠れている */
-            int isTopEdge = abs(vis.top - wb.top) < (5 + height / 2 + 2);
-            int isBottomEdge = abs(vis.bottom - wb.bottom) < (5 + height / 2 + 2);
+            int isTopEdge = abs(vis.top - wb.top) < (EDGE_TOLERANCE_MARGIN + height / 2 + EDGE_TOLERANCE_EXTRA);
+            int isBottomEdge = abs(vis.bottom - wb.bottom) < (EDGE_TOLERANCE_MARGIN + height / 2 + EDGE_TOLERANCE_EXTRA);
             int inside = bounds.left >= wb.left && bounds.right <= wb.right &&
                          bounds.top >= wb.top && bounds.bottom <= wb.bottom;
             if (inside)
@@ -1335,12 +1347,12 @@ static void CheckGroundedNormal(Player *p, float dt)
     }
 
     int feetX = (int)p->x;
-    int feetY = (int)p->y + p->height - 10;
+    int feetY = (int)p->y + p->height - GROUND_SAMPLE_INSET;
     int feetW = p->width;
 
     float maxStep = fabsf(p->vy * dt);
-    if (maxStep < 20.0f)
-        maxStep = 20.0f;
+    if (maxStep < GROUND_SWEEP_MIN_STEP)
+        maxStep = GROUND_SWEEP_MIN_STEP;
 
     int sweepTop = (int)fminf((float)feetY, feetY + p->vy * dt) - 5;
     int sweepBottom = feetY + GROUND_CHECK_H + 10 + (int)maxStep;
@@ -1355,7 +1367,7 @@ static void CheckGroundedNormal(Player *p, float dt)
         RECT z = g_noEntryZones[i];
         if (!RectsOverlap(sweep, z))
             continue;
-        if (playerBottom >= z.top && playerBottom <= z.top + 5 &&
+        if (playerBottom >= z.top && playerBottom <= z.top + GROUND_CONTACT_TOLERANCE &&
             playerRight > z.left && playerLeft < z.right)
         {
             p->grounded = 1;
@@ -1394,7 +1406,7 @@ static void CheckGroundedNormal(Player *p, float dt)
             RECT visBand;
             if (!NoEntry_GetVisiblePortion(i, sweepPart, &visBand))
                 continue; /* より前面のウィンドウに隠れている */
-            if (playerBottom >= visBand.top && playerBottom <= visBand.top + 5 &&
+            if (playerBottom >= visBand.top && playerBottom <= visBand.top + GROUND_CONTACT_TOLERANCE &&
                 playerRight > visBand.left && playerLeft < visBand.right)
             {
                 p->grounded = 1;
@@ -1414,7 +1426,7 @@ static void CheckGroundedNormal(Player *p, float dt)
         GetWindowFullBounds(g_windows[i].hwnd, &wb);
         if (!RectsOverlap(sweep, wb))
             continue;
-        if (playerBottom >= wb.top && playerBottom <= wb.top + 5 &&
+        if (playerBottom >= wb.top && playerBottom <= wb.top + GROUND_CONTACT_TOLERANCE &&
             playerRight > wb.left && playerLeft < wb.right)
         {
             p->grounded = 1;
@@ -1446,7 +1458,7 @@ static void CheckGroundedNormal(Player *p, float dt)
             RECT icon = DesktopIcon_GetBounds(i);
             if (!RectsOverlap(currentFeetBounds, icon))
                 continue;
-            if (playerBottom < icon.top || playerBottom > icon.top + 5 ||
+            if (playerBottom < icon.top || playerBottom > icon.top + GROUND_CONTACT_TOLERANCE ||
                 playerRight <= icon.left || playerLeft >= icon.right)
                 continue;
             checked++;
@@ -1476,7 +1488,7 @@ static void CheckGroundedNormal(Player *p, float dt)
                 continue;
             RECT wb;
             GetWindowFullBounds(d->hwnd, &wb);
-            if (playerBottom < wb.top || playerBottom > wb.top + 5 ||
+            if (playerBottom < wb.top || playerBottom > wb.top + GROUND_CONTACT_TOLERANCE ||
                 playerRight <= wb.left || playerLeft >= wb.right)
                 continue;
 
@@ -1599,12 +1611,12 @@ static void CheckGroundedInverted(Player *p, float dt)
     }
 
     int headX = (int)p->x;
-    int headY = (int)p->y + 10;
+    int headY = (int)p->y + GROUND_SAMPLE_INSET;
     int headW = p->width;
 
     float maxStep = fabsf(p->vy * dt);
-    if (maxStep < 20.0f)
-        maxStep = 20.0f;
+    if (maxStep < GROUND_SWEEP_MIN_STEP)
+        maxStep = GROUND_SWEEP_MIN_STEP;
 
     int sweepBottom = (int)fmaxf((float)headY, headY + p->vy * dt) + 5;
     int sweepTop = headY - GROUND_CHECK_H - 10 - (int)maxStep;
@@ -1625,7 +1637,7 @@ static void CheckGroundedInverted(Player *p, float dt)
            接地しないまま何フレームも足踏みしてしまうことがあった（実際に
            報告された不具合: 反転重力でウィンドウ裏側にほぼ密着しても接地
            しない）。z.bottomを中心に対称な許容範囲にする。 */
-        if (playerTop <= z.bottom + 5 && playerTop >= z.bottom - 5 &&
+        if (playerTop <= z.bottom + GROUND_CONTACT_TOLERANCE && playerTop >= z.bottom - GROUND_CONTACT_TOLERANCE &&
             playerRight > z.left && playerLeft < z.right)
         {
             p->grounded = 1;
@@ -1654,7 +1666,7 @@ static void CheckGroundedInverted(Player *p, float dt)
             if (!NoEntry_GetVisiblePortion(i, sweepPart, &visBand))
                 continue; /* より前面のウィンドウに隠れている */
             /* 上の静的NoEntryZoneと同じ理由で対称な許容範囲にする。 */
-            if (playerTop <= visBand.bottom + 5 && playerTop >= visBand.bottom - 5 &&
+            if (playerTop <= visBand.bottom + GROUND_CONTACT_TOLERANCE && playerTop >= visBand.bottom - GROUND_CONTACT_TOLERANCE &&
                 playerRight > visBand.left && playerLeft < visBand.right)
             {
                 p->grounded = 1;
@@ -1675,7 +1687,7 @@ static void CheckGroundedInverted(Player *p, float dt)
         if (!RectsOverlap(sweep, wb))
             continue;
         /* 上の静的NoEntryZoneと同じ理由で対称な許容範囲にする。 */
-        if (playerTop <= wb.bottom + 5 && playerTop >= wb.bottom - 5 &&
+        if (playerTop <= wb.bottom + GROUND_CONTACT_TOLERANCE && playerTop >= wb.bottom - GROUND_CONTACT_TOLERANCE &&
             playerRight > wb.left && playerLeft < wb.right)
         {
             p->grounded = 1;
@@ -1700,7 +1712,7 @@ static void CheckGroundedInverted(Player *p, float dt)
             GetWindowFullBounds(d->hwnd, &wb);
             int contactY = FloorContactY(d, wb);
             /* 上の静的NoEntryZoneと同じ理由で対称な許容範囲にする。 */
-            if (playerTop > contactY + 5 || playerTop < contactY - 5 ||
+            if (playerTop > contactY + GROUND_CONTACT_TOLERANCE || playerTop < contactY - GROUND_CONTACT_TOLERANCE ||
                 playerRight <= wb.left || playerLeft >= wb.right)
                 continue;
 

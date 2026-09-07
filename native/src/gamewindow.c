@@ -25,6 +25,16 @@ static const char *kGameWindowClass = "WA_GameWindow";
 static const int NOENTRY_BORDER_WIDTH = 5;
 static const int STRIPE_WIDTH = 20;
 
+/* Draw*Markファミリー(DrawMovableMark/DrawResizableMark/DrawDeletableMark)
+   共通の寸法: 中心からの半径と矢印/角の長さ。 */
+static const int MARK_RADIUS = 18;
+static const int MARK_ARROW_LEN = 6;
+static const int MARK_PEN_WIDTH = 3;
+/* DrawMinimizableMarkのバー半分の寸法。MinimizableWindowStrategy.
+   DrawStrategyMark: markSize=60の半分(30)と、barHeight=markSize/6=10の半分(5)。 */
+static const int MINIMIZE_BAR_HALF_W = 30;
+static const int MINIMIZE_BAR_HALF_H = 5;
+
 int FindWindowIndex(HWND hwnd)
 {
     for (int i = 0; i < g_windowCount; i++)
@@ -374,8 +384,8 @@ static void DrawMovableMark(HDC hdc, RECT rc, COLORREF color)
 {
     int cx = (rc.left + rc.right) / 2;
     int cy = (rc.top + rc.bottom) / 2;
-    int r = 18;
-    HPEN pen = CreatePen(PS_SOLID, 3, color);
+    int r = MARK_RADIUS;
+    HPEN pen = CreatePen(PS_SOLID, MARK_PEN_WIDTH, color);
     HPEN old = (HPEN)SelectObject(hdc, pen);
 
     MoveToEx(hdc, cx - r, cy, NULL);
@@ -383,7 +393,7 @@ static void DrawMovableMark(HDC hdc, RECT rc, COLORREF color)
     MoveToEx(hdc, cx, cy - r, NULL);
     LineTo(hdc, cx, cy + r);
 
-    int a = 6;
+    int a = MARK_ARROW_LEN;
     MoveToEx(hdc, cx - r, cy, NULL);
     LineTo(hdc, cx - r + a, cy - a);
     MoveToEx(hdc, cx - r, cy, NULL);
@@ -409,13 +419,13 @@ static void DrawResizableMark(HDC hdc, RECT rc, COLORREF color)
 {
     int cx = (rc.left + rc.right) / 2;
     int cy = (rc.top + rc.bottom) / 2;
-    int r = 18;
-    HPEN pen = CreatePen(PS_SOLID, 3, color);
+    int r = MARK_RADIUS;
+    HPEN pen = CreatePen(PS_SOLID, MARK_PEN_WIDTH, color);
     HPEN old = (HPEN)SelectObject(hdc, pen);
 
     MoveToEx(hdc, cx - r, cy - r, NULL);
     LineTo(hdc, cx + r, cy + r);
-    int a = 6;
+    int a = MARK_ARROW_LEN;
     MoveToEx(hdc, cx - r, cy - r, NULL);
     LineTo(hdc, cx - r + a, cy - r);
     MoveToEx(hdc, cx - r, cy - r, NULL);
@@ -436,7 +446,7 @@ static void DrawMinimizableMark(HDC hdc, RECT rc, COLORREF color)
     int cx = (rc.left + rc.right) / 2;
     int cy = (rc.top + rc.bottom) / 2;
     HBRUSH br = CreateSolidBrush(color);
-    RECT bar = {cx - 30, cy - 5, cx + 30, cy + 5};
+    RECT bar = {cx - MINIMIZE_BAR_HALF_W, cy - MINIMIZE_BAR_HALF_H, cx + MINIMIZE_BAR_HALF_W, cy + MINIMIZE_BAR_HALF_H};
     FillRect(hdc, &bar, br);
     DeleteObject(br);
 }
@@ -445,8 +455,8 @@ static void DrawDeletableMark(HDC hdc, RECT rc, COLORREF color)
 {
     int cx = (rc.left + rc.right) / 2;
     int cy = (rc.top + rc.bottom) / 2;
-    int r = 18;
-    HPEN pen = CreatePen(PS_SOLID, 3, color);
+    int r = MARK_RADIUS;
+    HPEN pen = CreatePen(PS_SOLID, MARK_PEN_WIDTH, color);
     HPEN old = (HPEN)SelectObject(hdc, pen);
 
     MoveToEx(hdc, cx - r, cy - r, NULL);
