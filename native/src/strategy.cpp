@@ -27,94 +27,91 @@ static void FollowMovedWindowIfDescendant(GameWindowData *w, int movedIndex, int
     InvalidateRect(w->hwnd, NULL, FALSE);
 }
 
+/* 以前はここに種別ごとのswitch文があったが、各処理はMovableWindow/
+   ResizableWindow/UnconstrainedWindow/MinimizableWindowのOnMouseDown
+   オーバーライドへ移した(内容は変更していない)。それ以外の種別は
+   基底クラスのno-op実装(switch文のdefault:break;に相当)がそのまま呼ばれる。 */
 void Strategy_HandleMouseDown(int index)
 {
     GameWindowData *data = GetWindowData(index);
     if (!data)
         return;
+    data->OnMouseDown(index);
+}
 
-    switch (data->kind)
-    {
-    case WT_MOVABLE:
-    case WT_MOVABLE_NOENTRY:
-    {
-        data->dragging = 1;
-        SetCapture(data->hwnd);
-        /* window.PointToClient(Cursor.Position)相当: 画面絶対座標そのままでは
-           なく、その時点のウィンドウ左上を基準にした相対座標で記録する
-           （UpdateMovable参照 -- この基準の動的な取り直しが、ドラッグ開始位置
-           からの累積差分を絶対目標位置へ正しく収束させるために必須）。 */
-        POINT curAbs;
-        GetCursorPos(&curAbs);
-        RECT outer0;
-        GetWindowRect(data->hwnd, &outer0);
-        data->lastMouse.x = curAbs.x - outer0.left;
-        data->lastMouse.y = curAbs.y - outer0.top;
-        data->blockedL = data->blockedR = data->blockedU = data->blockedD = 0;
-        break;
-    }
-    case WT_RESIZABLE:
-    case WT_RESIZABLE_NOENTRY:
-    {
-        data->resizing = 1;
-        SetCapture(data->hwnd);
-        GetCursorPos(&data->resizeDragStart);
-        RECT r;
-        GetWindowRect(data->hwnd, &r);
-        data->resizeOrigSize.cx = r.right - r.left;
-        data->resizeOrigSize.cy = r.bottom - r.top;
+void MovableWindow::OnMouseDown(int index)
+{
+    dragging = 1;
+    SetCapture(hwnd);
+    /* window.PointToClient(Cursor.Position)相当: 画面絶対座標そのままでは
+       なく、その時点のウィンドウ左上を基準にした相対座標で記録する
+       （UpdateMovable参照 -- この基準の動的な取り直しが、ドラッグ開始位置
+       からの累積差分を絶対目標位置へ正しく収束させるために必須）。 */
+    POINT curAbs;
+    GetCursorPos(&curAbs);
+    RECT outer0;
+    GetWindowRect(hwnd, &outer0);
+    lastMouse.x = curAbs.x - outer0.left;
+    lastMouse.y = curAbs.y - outer0.top;
+    blockedL = blockedR = blockedU = blockedD = 0;
+}
 
-        /* これをインクリメントすると、以前のジェスチャー中に確立されたすべての
-           origSize（ウィンドウの子、ゴール、ボタン、プレイヤーすべて）が一括で
-           無効化される。以下のHierarchy_RecordOriginalSizesは、今この時点で
-           既にアタッチされているものについて即座に再確立する --
-           ResizableWindowStrategyのoriginalSizes辞書がStartResizing()の
-           たびに空から始まり、RecordOriginalSizesRecursiveによって埋められる
-           挙動を踏襲している。このジェスチャーの途中で子になったもの
-           （プレイヤーが歩いて入ってくる、ゴール/ボタンがドラッグで
-           乗せられる）は、代わりにHierarchy_ApplyRelativeTransformが初めて
-           触れられた際に currentSize/scale を遅延的に逆算するフォールバックに
-           任される。
-           これはオリジナルの "if (!originalSizes.ContainsKey(child))"
-           フォールバックと同じで、ドラッグ開始後にウィンドウが既にどれだけ
-           拡大縮小していたかに関わらず、いきなりcurrentSize倍にジャンプ
-           することを防ぐ。 */
-        g_resizeGeneration++;
-        Hierarchy_RecordOriginalSizes(index);
-        break;
-    }
-    case WT_MINIMIZABLE:
-    case WT_MINIMIZABLE_NOENTRY:
-        SetWindowMinimized(index, !data->minimized);
-        break;
-    case WT_UNCONSTRAINED:
-    case WT_UNCONSTRAINED_NOENTRY:
-    {
-        data->resizing = 1;
-        SetCapture(data->hwnd);
-        GetCursorPos(&data->resizeDragStart);
+void ResizableWindow::OnMouseDown(int index)
+{
+    resizing = 1;
+    SetCapture(hwnd);
+    GetCursorPos(&resizeDragStart);
+    RECT r;
+    GetWindowRect(hwnd, &r);
+    resizeOrigSize.cx = r.right - r.left;
+    resizeOrigSize.cy = r.bottom - r.top;
 
-        /* このジェスチャーの基準となる符号付き論理サイズをresizeOrigSizeに
-           退避する（cx/cyはLONGなので負値もそのまま格納できる）。 */
-        data->resizeOrigSize.cx = data->logicalW;
-        data->resizeOrigSize.cy = data->logicalH;
+    /* これをインクリメントすると、以前のジェスチャー中に確立されたすべての
+       origSize（ウィンドウの子、ゴール、ボタン、プレイヤーすべて）が一括で
+       無効化される。以下のHierarchy_RecordOriginalSizesは、今この時点で
+       既にアタッチされているものについて即座に再確立する --
+       ResizableWindowStrategyのoriginalSizes辞書がStartResizing()の
+       たびに空から始まり、RecordOriginalSizesRecursiveによって埋められる
+       挙動を踏襲している。このジェスチャーの途中で子になったもの
+       （プレイヤーが歩いて入ってくる、ゴール/ボタンがドラッグで
+       乗せられる）は、代わりにHierarchy_ApplyRelativeTransformが初めて
+       触れられた際に currentSize/scale を遅延的に逆算するフォールバックに
+       任される。
+       これはオリジナルの "if (!originalSizes.ContainsKey(child))"
+       フォールバックと同じで、ドラッグ開始後にウィンドウが既にどれだけ
+       拡大縮小していたかに関わらず、いきなりcurrentSize倍にジャンプ
+       することを防ぐ。 */
+    g_resizeGeneration++;
+    Hierarchy_RecordOriginalSizes(index);
+}
 
-        /* アンカー点（このジェスチャー中ずっと固定される角）を、現在の反転
-           状態から逆算する: 反転していない軸は実ウィンドウの左上そのもの、
-           反転している軸は実ウィンドウの右(下)端がアンカーになる
-           （UpdateUnconstrainedのVisualTopLeft計算と対になる）。 */
-        RECT r;
-        GetWindowRect(data->hwnd, &r);
-        data->unconstrainedAnchor.x = (data->logicalW < 0) ? r.right : r.left;
-        data->unconstrainedAnchor.y = (data->logicalH < 0) ? r.bottom : r.top;
+void MinimizableWindow::OnMouseDown(int index)
+{
+    SetWindowMinimized(index, !minimized);
+}
 
-        g_resizeGeneration++;
-        Hierarchy_RecordOriginalSizes(index);
-        break;
-    }
-    default:
-        break;
-    }
+void UnconstrainedWindow::OnMouseDown(int index)
+{
+    resizing = 1;
+    SetCapture(hwnd);
+    GetCursorPos(&resizeDragStart);
+
+    /* このジェスチャーの基準となる符号付き論理サイズをresizeOrigSizeに
+       退避する（cx/cyはLONGなので負値もそのまま格納できる）。 */
+    resizeOrigSize.cx = logicalW;
+    resizeOrigSize.cy = logicalH;
+
+    /* アンカー点（このジェスチャー中ずっと固定される角）を、現在の反転
+       状態から逆算する: 反転していない軸は実ウィンドウの左上そのもの、
+       反転している軸は実ウィンドウの右(下)端がアンカーになる
+       （UpdateUnconstrainedのVisualTopLeft計算と対になる）。 */
+    RECT r;
+    GetWindowRect(hwnd, &r);
+    unconstrainedAnchor.x = (logicalW < 0) ? r.right : r.left;
+    unconstrainedAnchor.y = (logicalH < 0) ? r.bottom : r.top;
+
+    g_resizeGeneration++;
+    Hierarchy_RecordOriginalSizes(index);
 }
 
 void Strategy_HandleMouseUp(int index)
@@ -135,40 +132,26 @@ void Strategy_HandleMouseUp(int index)
         Hierarchy_CheckAndUpdate(index);
 }
 
-void Strategy_HandleButtonClick(WindowKind kind)
-{
-    switch (kind)
-    {
-    case WT_BTN_START:
-        g_requestNext = 1;
-        break;
-    case WT_BTN_RETRY:
-        g_requestRestart = 1;
-        break;
-    case WT_BTN_TOTITLE:
-        g_requestToTitle = 1;
-        break;
-    case WT_BTN_EXIT:
-        g_requestExit = 1;
-        break;
+/* 以前はここに種別ごとのswitch文があったが、各処理は各ボタンクラスの
+   OnClickオーバーライドへ移した(内容は変更していない)。呼び出し元
+   (GameWindowProcのWM_LBUTTONUPハンドラ)はg_windows[index].OnClick()を
+   直接呼ぶよう変更したため、この関数自体は不要になった。 */
+
+void StartButton::OnClick() { g_requestNext = 1; }
+void RetryButton::OnClick() { g_requestRestart = 1; }
+void ToTitleButton::OnClick() { g_requestToTitle = 1; }
+void ExitButton::OnClick() { g_requestExit = 1; }
 #ifdef ENABLE_STAGE_EDITOR
-    case WT_BTN_TEST:
-        g_requestTest = 1;
-        break;
-    case WT_BTN_EXPORT:
-        Editor_ExportStage();
-        break;
-    case WT_BTN_RESET:
-        /* hInstanceはstrategy.cからは持っていないため、main.cのリクエスト
-           フラグ経由でEditor_LoadTestStageを呼び直す（g_requestTestを
-           再利用する: 現在既にテストステージ中でも同じ処理で作り直せる）。 */
-        g_requestTest = 1;
-        break;
-#endif
-    default:
-        break;
-    }
+void TestButton::OnClick() { g_requestTest = 1; }
+void ExportButton::OnClick() { Editor_ExportStage(); }
+void ResetButton::OnClick()
+{
+    /* hInstanceはstrategy.cからは持っていないため、main.cのリクエスト
+       フラグ経由でEditor_LoadTestStageを呼び直す（g_requestTestを
+       再利用する: 現在既にテストステージ中でも同じ処理で作り直せる）。 */
+    g_requestTest = 1;
 }
+#endif
 
 static void UpdateMovable(int index, GameWindowData *data)
 {
@@ -465,6 +448,14 @@ static void UpdateUnconstrained(int index, GameWindowData *data)
     }
 }
 
+/* UpdateMovable/UpdateResizable/UpdateUnconstrainedへの委譲。以前は
+   Strategy_UpdateAll内でkindを見てUpdateUnconstrained/UpdateResizableを
+   切り替えていたが、その分岐はUpdateResizeの仮想ディスパッチ(どちらの
+   クラスがインスタンス化されているか)へ置き換えた。 */
+void MovableWindow::UpdateDrag(int index) { UpdateMovable(index, this); }
+void ResizableWindow::UpdateResize(int index) { UpdateResizable(index, this); }
+void UnconstrainedWindow::UpdateResize(int index) { UpdateUnconstrained(index, this); }
+
 void Strategy_UpdateAll(float dt)
 {
     (void)dt;
@@ -472,13 +463,8 @@ void Strategy_UpdateAll(float dt)
     {
         GameWindowData *data = &g_windows[i];
         if (data->dragging)
-            UpdateMovable(i, data);
+            data->UpdateDrag(i);
         else if (data->resizing)
-        {
-            if (data->kind == WT_UNCONSTRAINED || data->kind == WT_UNCONSTRAINED_NOENTRY)
-                UpdateUnconstrained(i, data);
-            else
-                UpdateResizable(i, data);
-        }
+            data->UpdateResize(i);
     }
 }

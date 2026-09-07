@@ -15,9 +15,53 @@ WindowRegistry g_windows;
 int g_windowCount = 0;
 int g_resizeGeneration = 0;
 
-GameWindowData *WindowRegistry::Add()
+/* C++移行フェーズ3: kindに応じた派生クラスのインスタンスを作るファクトリ。
+   WindowFactory.CreateWindow(C#版)に相当する、この設計で唯一避けられない
+   switch -- ここで一度だけ「どのクラスを作るか」を決め、以降の挙動は
+   virtual呼び出し(OnMouseDown/UpdateResize/DrawStrategyMark/OnClick)に
+   委ねる。NoEntry版は非NoEntry版と挙動が同一なので同じクラスを共有する。 */
+static std::unique_ptr<GameWindowData> MakeWindowInstance(WindowKind kind)
 {
-    slots_.push_back(std::make_unique<GameWindowData>());
+    switch (kind)
+    {
+    case WT_MOVABLE:
+    case WT_MOVABLE_NOENTRY:
+        return std::make_unique<MovableWindow>();
+    case WT_RESIZABLE:
+    case WT_RESIZABLE_NOENTRY:
+        return std::make_unique<ResizableWindow>();
+    case WT_UNCONSTRAINED:
+    case WT_UNCONSTRAINED_NOENTRY:
+        return std::make_unique<UnconstrainedWindow>();
+    case WT_MINIMIZABLE:
+    case WT_MINIMIZABLE_NOENTRY:
+        return std::make_unique<MinimizableWindow>();
+    case WT_DELETABLE:
+        return std::make_unique<DeletableWindow>();
+    case WT_BTN_START:
+        return std::make_unique<StartButton>();
+    case WT_BTN_RETRY:
+        return std::make_unique<RetryButton>();
+    case WT_BTN_TOTITLE:
+        return std::make_unique<ToTitleButton>();
+    case WT_BTN_EXIT:
+        return std::make_unique<ExitButton>();
+#ifdef ENABLE_STAGE_EDITOR
+    case WT_BTN_TEST:
+        return std::make_unique<TestButton>();
+    case WT_BTN_EXPORT:
+        return std::make_unique<ExportButton>();
+    case WT_BTN_RESET:
+        return std::make_unique<ResetButton>();
+#endif
+    default:
+        return std::make_unique<GameWindowData>();
+    }
+}
+
+GameWindowData *WindowRegistry::Add(WindowKind kind)
+{
+    slots_.push_back(MakeWindowInstance(kind));
     g_windowCount = (int)slots_.size();
     return slots_.back().get();
 }
@@ -33,7 +77,6 @@ int g_noEntryZoneCount = 0;
 
 extern void Strategy_HandleMouseDown(int index);
 extern void Strategy_HandleMouseUp(int index);
-extern void Strategy_HandleButtonClick(WindowKind kind);
 
 static const char *kGameWindowClass = "WA_GameWindow";
 static const int NOENTRY_BORDER_WIDTH = 5;
@@ -537,6 +580,17 @@ static void DrawKindMark(HDC hdc, RECT rc, WindowKind kind, COLORREF markColor)
         DrawDeletableMark(hdc, rc, markColor);
 }
 
+/* DrawKindMarkのswitch分岐を仮想関数のオーバーライドへ置き換えたもの。
+   ステージエディターのパレットアイコン(paletteKindという「実際にはこの
+   オブジェクトの種別ではない、配置予定の種別」のプレビュー)だけは特定の
+   オブジェクトに紐付かない値ベースの描画が必要なため、DrawKindMark
+   (kindを引数に取る自由関数)自体は残し、そちらから引き続き使う。 */
+void MovableWindow::DrawStrategyMark(HDC hdc, RECT rc, COLORREF color) const { DrawMovableMark(hdc, rc, color); }
+void ResizableWindow::DrawStrategyMark(HDC hdc, RECT rc, COLORREF color) const { DrawResizableMark(hdc, rc, color); }
+void UnconstrainedWindow::DrawStrategyMark(HDC hdc, RECT rc, COLORREF color) const { DrawResizableMark(hdc, rc, color); }
+void MinimizableWindow::DrawStrategyMark(HDC hdc, RECT rc, COLORREF color) const { DrawMinimizableMark(hdc, rc, color); }
+void DeletableWindow::DrawStrategyMark(HDC hdc, RECT rc, COLORREF color) const { DrawDeletableMark(hdc, rc, color); }
+
 /* ゲーム描画のタイトルバー帯（クライアント領域最上部TITLE_BAR_HEIGHT px）を
    描画する。WS_CAPTIONを使わなくなったため、OS標準のタイトルバーの代わりに
    ここで自前描画する。デフォルトの配色は固定のダークグレー+白文字で、
@@ -656,9 +710,12 @@ static void PaintGameWindow(HWND hwnd, int index)
     case WT_UNCONSTRAINED:
     case WT_UNCONSTRAINED_NOENTRY:
     {
-        /* StrategyMarkUtility.GetMarkColor: ホバー中は白、それ以外は中間グレー。 */
+        /* StrategyMarkUtility.GetMarkColor: ホバー中は白、それ以外は中間グレー。
+           どのマークを描くかはdata自身の実行時型(MovableWindow等、
+           WindowRegistry::Addのファクトリでkindに応じて選ばれている)に
+           委ねる仮想呼び出し -- 以前はここでもう一度kindを見て分岐していた。 */
         COLORREF markColor = IsWindowHovered(index) ? RGB(255, 255, 255) : RGB(128, 128, 128);
-        DrawKindMark(memDC, contentRc, data->kind, markColor);
+        data->DrawStrategyMark(memDC, contentRc, markColor);
         break;
     }
     case WT_GOAL:
@@ -949,7 +1006,7 @@ static LRESULT CALLBACK GameWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 #endif
             ZOrder_BringToFront(hwnd);
             if (IsButtonWindowKind(g_windows[index].kind))
-                Strategy_HandleButtonClick(g_windows[index].kind);
+                g_windows[index].OnClick();
             else
                 Strategy_HandleMouseDown(index);
         }
@@ -1172,7 +1229,7 @@ int CreateGameWindowIndexed(HINSTANCE hInstance, WindowKind kind, int x, int y, 
     }
 
     int index = g_windowCount; /* Add()がg_windowCountをindex+1へ更新する前の値 */
-    GameWindowData *data = g_windows.Add(); /* std::make_uniqueの値初期化により既にゼロ初期化済み */
+    GameWindowData *data = g_windows.Add(kind); /* std::make_uniqueの値初期化により既にゼロ初期化済み */
     data->hwnd = hwnd;
     data->kind = kind;
     data->bg = bg;

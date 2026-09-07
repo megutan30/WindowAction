@@ -90,7 +90,8 @@ typedef enum {
 #endif
 } WindowKind;
 
-typedef struct {
+struct GameWindowData
+{
     HWND hwnd;
     WindowKind kind;
     COLORREF bg;
@@ -212,7 +213,75 @@ typedef struct {
        配置（ドラッグ&ドロップ）で生成されたウィンドウでは常に0のまま。 */
     int isEditorChrome;
 #endif
-} GameWindowData;
+
+    /* C++移行フェーズ3: 元のC#版IWindowStrategy(BaseWindowStrategyの
+       仮想メソッド)に相当する仮想フック。挙動を変えずに、strategy.cpp/
+       gamewindow.cppにあった「kindでswitchして分岐する」処理を、対応する
+       派生クラス(下記)のオーバーライドへ置き換える。フィールドは種別ごとに
+       派生クラスへ移さず、あえてこの基底クラスに全て残したまま（フラットな
+       レイアウト）にしている -- 自動テストが無い状態でフィールドアクセスの
+       形（&g_windows[i]をGameWindowData*として扱う数百箇所の呼び出し）まで
+       変更すると壊れた際の検出が困難になるため、今回は「振る舞いの
+       仮想化」だけをスコープにした意図的な設計判断。既定の実装は全て
+       no-op(何もしない)で、これはswitch文のdefault:break;と同じ意味。 */
+    virtual ~GameWindowData() = default;
+    virtual void OnMouseDown(int index) { (void)index; }
+    virtual void UpdateDrag(int index) { (void)index; }
+    virtual void UpdateResize(int index) { (void)index; }
+    virtual void DrawStrategyMark(HDC hdc, RECT rc, COLORREF color) const { (void)hdc; (void)rc; (void)color; }
+    virtual void OnClick() {}
+};
+
+/* ---- Strategy_HandleMouseDown/Strategy_UpdateAll/DrawKindMarkのswitch文を
+   置き換える派生クラス群。NoEntry版(WT_*_NOENTRY)は挙動が非NoEntry版と
+   完全に同一(isNoEntryは純粋なデータフラグであり、描画・当たり判定側で
+   別途参照される)なので、専用のサブクラスは作らず同じクラスを共有する
+   -- WindowRegistry::Add(kind)のファクトリ内switchで両方のkindを同じ
+   クラスへマッピングする。 ---- */
+
+struct MovableWindow : GameWindowData
+{
+    void OnMouseDown(int index) override;
+    void UpdateDrag(int index) override;
+    void DrawStrategyMark(HDC hdc, RECT rc, COLORREF color) const override;
+};
+
+struct ResizableWindow : GameWindowData
+{
+    void OnMouseDown(int index) override;
+    void UpdateResize(int index) override;
+    void DrawStrategyMark(HDC hdc, RECT rc, COLORREF color) const override;
+};
+
+struct UnconstrainedWindow : GameWindowData
+{
+    void OnMouseDown(int index) override;
+    void UpdateResize(int index) override;
+    void DrawStrategyMark(HDC hdc, RECT rc, COLORREF color) const override;
+};
+
+struct MinimizableWindow : GameWindowData
+{
+    void OnMouseDown(int index) override;
+    void DrawStrategyMark(HDC hdc, RECT rc, COLORREF color) const override;
+};
+
+struct DeletableWindow : GameWindowData
+{
+    void DrawStrategyMark(HDC hdc, RECT rc, COLORREF color) const override;
+};
+
+/* ---- Strategy_HandleButtonClickのswitch文を置き換えるボタン派生クラス群。 ---- */
+
+struct StartButton : GameWindowData { void OnClick() override; };
+struct RetryButton : GameWindowData { void OnClick() override; };
+struct ToTitleButton : GameWindowData { void OnClick() override; };
+struct ExitButton : GameWindowData { void OnClick() override; };
+#ifdef ENABLE_STAGE_EDITOR
+struct TestButton : GameWindowData { void OnClick() override; };
+struct ExportButton : GameWindowData { void OnClick() override; };
+struct ResetButton : GameWindowData { void OnClick() override; };
+#endif
 
 /* C++移行フェーズ2: 以前は固定長のGameWindowData g_windows[MAX_WINDOWS]配列
    だったものを、std::vector<std::unique_ptr<GameWindowData>>で保持する
@@ -231,10 +300,12 @@ public:
     GameWindowData &operator[](int i) { return *slots_[i]; }
     const GameWindowData &operator[](int i) const { return *slots_[i]; }
 
-    /* 新しいスロットを追加し、ゼロ初期化済みのポインタを返す
-       (std::make_uniqueによる値初期化は、GameWindowDataがPOD構造体である
-       ため以前のZeroMemoryと完全に等価)。 */
-    GameWindowData *Add();
+    /* kindに応じた派生クラス(MovableWindow/ResizableWindow等)のインスタンスを
+       新しいスロットとして追加し、ゼロ初期化済みのポインタを返す
+       (std::make_uniqueによる値初期化は、フィールドをZeroMemoryしていた
+       以前の実装と完全に等価 -- 仮想関数を持つようになった後もクラスに
+       ユーザー定義コンストラクタが無い限りこの等価性は保たれる)。 */
+    GameWindowData *Add(WindowKind kind);
 
     /* 全スロットを破棄し空にする(ResetWindowRegistry専用)。 */
     void Clear();

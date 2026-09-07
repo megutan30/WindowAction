@@ -10,7 +10,6 @@ extern int g_requestExit;
 
 void Strategy_HandleMouseDown(int index);
 void Strategy_HandleMouseUp(int index);
-void Strategy_HandleButtonClick(WindowKind kind);
 void Strategy_UpdateAll(float dt);
 
 #endif
