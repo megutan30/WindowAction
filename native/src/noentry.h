@@ -2,6 +2,7 @@
 #define NOENTRY_H
 
 #include <windows.h>
+#include <functional>
 
 /* "WA_NoEntryZone"ウィンドウクラスを登録する。NoEntry_AddZoneを呼ぶ前に
    起動時に一度だけ呼ぶこと。 */
@@ -54,6 +55,20 @@ int NoEntry_IsRectVisibleFromWindow(int windowIndex, RECT rect);
    隠れている場合に、見えている/見えていない境目でプレイヤーの挙動が
    おかしくなる（実際に報告された不具合）。 */
 int NoEntry_GetVisiblePortion(int windowIndex, RECT rect, RECT *outBounds);
+
+/* C++移行フェーズ5: NoEntry_GetVisiblePortionと、collision.cppの
+   IsNormalWindowVisibleFromExcludedは、どちらも「windowIndexより前面に
+   あり、かつ述語isOccluderを満たすウィンドウの矩形を順にrectから
+   RGN_DIFFで差し引いていき、何か残ればそのバウンディングボックスを返す」
+   というZ-order+Region方式の同一アルゴリズムだったが、遮蔽対象の判定条件
+   だけが異なるために別々に実装されていた（Cの時代はコールバック/述語を
+   自然に渡す手段が無く統合を見送っていた）。共通コアをここに切り出し、
+   isOccluderで呼び出し側ごとに異なる遮蔽条件を渡せるようにする。
+   windowIndex自身・非表示(!hwnd)・windowIndex以下のZ-orderは、
+   どちらの呼び出し元でも共通の除外条件のため、ここで固定で処理する。 */
+int NoEntry_ComputeVisibleRegion(int windowIndex, RECT rect,
+                                  const std::function<bool(int)> &isOccluder,
+                                  RECT *outBounds);
 
 /* NoEntry_GetBoundaryRectsの可視性考慮版。より前面の（NoEntryに限らない）
    ウィンドウに完全に隠されている境界帯は除外し、部分的に隠れているものは

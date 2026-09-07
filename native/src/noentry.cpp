@@ -158,8 +158,9 @@ int NoEntry_GetBoundaryRects(int windowIndex, RECT out[4])
     return 4;
 }
 
-/* noentry.h参照。 */
-int NoEntry_GetVisiblePortion(int windowIndex, RECT rect, RECT *outBounds)
+int NoEntry_ComputeVisibleRegion(int windowIndex, RECT rect,
+                                  const std::function<bool(int)> &isOccluder,
+                                  RECT *outBounds)
 {
     HWND hwnd = g_windows[windowIndex].hwnd;
     if (!hwnd || IsRectEmpty(&rect))
@@ -170,17 +171,12 @@ int NoEntry_GetVisiblePortion(int windowIndex, RECT rect, RECT *outBounds)
 
     for (int i = 0; i < g_windowCount; i++)
     {
-        /* NoEntryBoundaryCollider.CheckCollisionは、他のNoEntryウィンドウに
-           限らず、より前面にある「あらゆる」ウィンドウを除外対象とする --
-           NoEntryウィンドウの境界の手前に置かれた通常ウィンドウも、通常の
-           描画の重なり順（上に描かれたものが下を隠す）と同様にその部分を
-           隠す。ここで対象とするのは、オリジナルのwindowsListが保持するのと
-           同じGameWindow相当の集合のみ: GoalやボタンはそちらではWindowsList
-           とは別に管理されており、遮蔽物にはならない。 */
-        if (i == windowIndex || !IsQueryableWindow(g_windows[i].kind) || !g_windows[i].hwnd || g_windows[i].minimized)
+        if (i == windowIndex || !g_windows[i].hwnd)
             continue;
         if (ZOrder_GetIndex(g_windows[i].hwnd) <= myZ)
             continue; /* 厳密により前面にあるウィンドウのみが遮蔽できる */
+        if (!isOccluder(i))
+            continue;
 
         RECT coverBounds;
         GetWindowFullBounds(g_windows[i].hwnd, &coverBounds);
@@ -196,6 +192,21 @@ int NoEntry_GetVisiblePortion(int windowIndex, RECT rect, RECT *outBounds)
     if (outBounds)
         *outBounds = box;
     return 1;
+}
+
+/* noentry.h参照。 */
+int NoEntry_GetVisiblePortion(int windowIndex, RECT rect, RECT *outBounds)
+{
+    /* NoEntryBoundaryCollider.CheckCollisionは、他のNoEntryウィンドウに
+       限らず、より前面にある「あらゆる」ウィンドウを除外対象とする --
+       NoEntryウィンドウの境界の手前に置かれた通常ウィンドウも、通常の
+       描画の重なり順（上に描かれたものが下を隠す）と同様にその部分を
+       隠す。ここで対象とするのは、オリジナルのwindowsListが保持するのと
+       同じGameWindow相当の集合のみ: GoalやボタンはそちらではWindowsList
+       とは別に管理されており、遮蔽物にはならない。 */
+    auto isOccluder = [](int i)
+    { return IsQueryableWindow(g_windows[i].kind) && !g_windows[i].minimized; };
+    return NoEntry_ComputeVisibleRegion(windowIndex, rect, isOccluder, outBounds);
 }
 
 int NoEntry_IsRectVisibleFromWindow(int windowIndex, RECT rect)

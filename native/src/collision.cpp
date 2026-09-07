@@ -22,39 +22,26 @@ static int RectsOverlap(RECT a, RECT b)
    なるのは他のNoEntryウィンドウのみ（通常ウィンドウ同士は「透明」であり
    互いを隠さない） -- ただしオリジナルから引き継いだ意図的な例外が一つある:
    excludeIndexの親ウィンドウは、NoEntryでなくても常に遮蔽物として扱われる。
-   これにより、ウィンドウが自分の親の背後をすり抜けられないようにしている。 */
+   これにより、ウィンドウが自分の親の背後をすり抜けられないようにしている。
+   Z-order+Region方式の可視性判定コア自体はnoentry.cppのNoEntry_
+   GetVisiblePortionと同一アルゴリズムのため、NoEntry_ComputeVisibleRegionを
+   共有し、遮蔽条件だけをここで述語として渡す。 */
 static int IsNormalWindowVisibleFromExcluded(int windowIndex, int excludeIndex)
 {
     GameWindowData *win = &g_windows[windowIndex];
     RECT windowBounds;
     GetWindowFullBounds(win->hwnd, &windowBounds);
 
-    GdiHandle<HRGN> visible(CreateRectRgnIndirect(&windowBounds));
-    int myZ = ZOrder_GetIndex(win->hwnd);
     int excludeParentIdx = (excludeIndex >= 0) ? g_windows[excludeIndex].parentIdx : -1;
-
-    for (int i = 0; i < g_windowCount; i++)
+    auto isOccluder = [excludeIndex, excludeParentIdx](int i)
     {
-        if (!g_windows[i].hwnd || i == windowIndex)
-            continue;
-        if (ZOrder_GetIndex(g_windows[i].hwnd) <= myZ)
-            continue;
-        if (i == excludeIndex)
-            continue; /* 移動中のウィンドウ自身が自分の障害物を隠すことはない */
-
-        RECT coverBounds;
-        GetWindowFullBounds(g_windows[i].hwnd, &coverBounds);
-
-        if (i != excludeParentIdx && (!g_windows[i].isNoEntry || g_windows[i].minimized))
-            continue;
-
-        GdiHandle<HRGN> coverRgn(CreateRectRgnIndirect(&coverBounds));
-        CombineRgn(visible, visible, coverRgn, RGN_DIFF);
-    }
-
-    RECT box;
-    int rgnType = GetRgnBox(visible, &box);
-    return (rgnType != NULLREGION && rgnType != ERROR);
+        if (i == excludeIndex) /* 移動中のウィンドウ自身が自分の障害物を隠すことはない */
+            return false;
+        if (i == excludeParentIdx)
+            return true;
+        return g_windows[i].isNoEntry != 0 && !g_windows[i].minimized;
+    };
+    return NoEntry_ComputeVisibleRegion(windowIndex, windowBounds, isOccluder, nullptr);
 }
 
 static int GatherObstacles(CollisionOptions opts, RECT *out, int maxOut)
