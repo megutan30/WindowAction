@@ -11,9 +11,22 @@
 #include <math.h>
 #include <dwmapi.h>
 
-GameWindowData g_windows[MAX_WINDOWS];
+WindowRegistry g_windows;
 int g_windowCount = 0;
 int g_resizeGeneration = 0;
+
+GameWindowData *WindowRegistry::Add()
+{
+    slots_.push_back(std::make_unique<GameWindowData>());
+    g_windowCount = (int)slots_.size();
+    return slots_.back().get();
+}
+
+void WindowRegistry::Clear()
+{
+    slots_.clear();
+    g_windowCount = 0;
+}
 
 RECT g_noEntryZones[MAX_NOENTRY_ZONES];
 int g_noEntryZoneCount = 0;
@@ -1052,7 +1065,7 @@ void ResetWindowRegistry(void)
         if (g_windows[i].hwnd)
             DestroyWindow(g_windows[i].hwnd);
     }
-    g_windowCount = 0;
+    g_windows.Clear();
     NoEntry_ResetZones();
     ZOrder_Reset();
 }
@@ -1158,9 +1171,8 @@ int CreateGameWindowIndexed(HINSTANCE hInstance, WindowKind kind, int x, int y, 
         }
     }
 
-    int index = g_windowCount++;
-    GameWindowData *data = &g_windows[index];
-    ZeroMemory(data, sizeof(*data));
+    int index = g_windowCount; /* Add()がg_windowCountをindex+1へ更新する前の値 */
+    GameWindowData *data = g_windows.Add(); /* std::make_uniqueの値初期化により既にゼロ初期化済み */
     data->hwnd = hwnd;
     data->kind = kind;
     data->bg = bg;

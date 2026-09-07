@@ -8,6 +8,8 @@
 #endif
 
 #include <windows.h>
+#include <vector>
+#include <memory>
 
 /* テストモードのパレット+ツールバー自体が常時22枠(#ifdef ENABLE_STAGE_EDITOR
    時点でのkPalette 19項目+ツールバー3項目、editor.c参照)を使い切ってしまう
@@ -212,7 +214,36 @@ typedef struct {
 #endif
 } GameWindowData;
 
-extern GameWindowData g_windows[MAX_WINDOWS];
+/* C++移行フェーズ2: 以前は固定長のGameWindowData g_windows[MAX_WINDOWS]配列
+   だったものを、std::vector<std::unique_ptr<GameWindowData>>で保持する
+   クラスに置き換える。ただしインデックスの安定性という核心的な性質は
+   完全に維持する -- DeleteWindowは要素を削除(erase)せず、その場でhwnd等を
+   クリアするだけの「墓標(tombstone)」方式であり、これはPlayer::parentIdxや
+   GameWindowData::childIdx[]のような、フレームをまたいで保持され続ける
+   インデックス参照が後から無効にならないために必須の設計（元のC実装から
+   引き継いだもの）。operator[]がGameWindowData&を返すため、既存の
+   g_windows[i]やg_windows[i].field、&g_windows[i]という呼び出し側の
+   構文は一切変更せずそのまま動く。Add()/Clear()がg_windowCountの更新も
+   内部で行うため、呼び出し側で二重管理する必要がない。 */
+class WindowRegistry
+{
+public:
+    GameWindowData &operator[](int i) { return *slots_[i]; }
+    const GameWindowData &operator[](int i) const { return *slots_[i]; }
+
+    /* 新しいスロットを追加し、ゼロ初期化済みのポインタを返す
+       (std::make_uniqueによる値初期化は、GameWindowDataがPOD構造体である
+       ため以前のZeroMemoryと完全に等価)。 */
+    GameWindowData *Add();
+
+    /* 全スロットを破棄し空にする(ResetWindowRegistry専用)。 */
+    void Clear();
+
+private:
+    std::vector<std::unique_ptr<GameWindowData>> slots_;
+};
+
+extern WindowRegistry g_windows;
 extern int g_windowCount;
 
 /* リサイズ操作が開始するたびに1回インクリメントされる（Strategy_HandleMouseDownの
