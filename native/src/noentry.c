@@ -1,6 +1,7 @@
 #include "noentry.h"
 #include "gamewindow.h"
 #include "zorder.h"
+#include "windowquery.h"
 
 #define NOENTRY_BOUNDARY_WIDTH 5
 #define ZONE_STRIPE_WIDTH 20
@@ -8,7 +9,7 @@
 
 static int RectsOverlap(RECT a, RECT b)
 {
-    return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    return WindowQuery_RectsOverlap(a, b);
 }
 
 static const char *kZoneWindowClass = "WA_NoEntryZone";

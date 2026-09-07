@@ -4,6 +4,7 @@
 #include "hierarchy.h"
 #include "player.h"
 #include "zorder.h"
+#include "windowquery.h"
 #include <stdlib.h>
 #include <limits.h>
 
@@ -11,7 +12,7 @@
 
 static int RectsOverlap(RECT a, RECT b)
 {
-    return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    return WindowQuery_RectsOverlap(a, b);
 }
 
 /* ZOrderVisibilityService.IsWindowVisibleFromNoEntryと一致: NoEntry

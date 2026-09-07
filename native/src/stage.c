@@ -4,14 +4,9 @@
 #include "noentry.h"
 #include "hierarchy.h"
 
-#define GOAL_SIZE 64
-#define BTN_W 150
-#define BTN_H 40
-
 static int g_hasGoal = 0;
 static RECT g_goalBounds;
 static int g_playerStartX, g_playerStartY;
-static int g_isTitleStage = 0;
 static int g_currentStage = -1;
 /* CurrentStage.EnableDesktopIconsと一致: このフラグを立てたステージだけ、
    プレイヤーの接地判定がデスクトップアイコンを床として扱う
@@ -36,7 +31,6 @@ int Stage_Count(void) { return TOTAL_STAGES; }
 int Stage_HasGoal(void) { return g_hasGoal; }
 RECT Stage_GetGoalBounds(void) { return g_goalBounds; }
 void Stage_GetPlayerStart(int *x, int *y) { *x = g_playerStartX; *y = g_playerStartY; }
-int Stage_IsTitleStage(void) { return g_isTitleStage; }
 int Stage_Current(void) { return g_currentStage; }
 int Stage_DesktopIconsEnabled(void) { return g_desktopIconsEnabled; }
 
@@ -47,7 +41,6 @@ void Stage_Load(HINSTANCE h, int index)
 
     ResetWindowRegistry();
     g_hasGoal = 0;
-    g_isTitleStage = 0;
     g_desktopIconsEnabled = 0;
     g_currentStage = index;
 
@@ -67,7 +60,6 @@ void Stage_Load(HINSTANCE h, int index)
 #ifdef ENABLE_STAGE_EDITOR
         MakeButton(h, WT_BTN_TEST, 850, 750, "Test");
 #endif
-        g_isTitleStage = 1;
         break;
 
     case 1: /* ステージ1 */
@@ -308,16 +300,6 @@ void Stage_Load(HINSTANCE h, int index)
         MakeButton(h, WT_BTN_RETRY, 369, 113, "Retry");
         break;
 
-    // case 21: /* ステージ21 - デスクトップアイコン（未実装、通常のプラットフォームステージとしてプレイされる） */
-    //     CreateGameWindow(h, WT_MINIMIZABLE, 250, 750, 375, 250, NULL);
-    //     CreateGameWindow(h, WT_TEXT_DISPLAY, 625, 463, 575, 125, "Stage21 DeskTopIcon");
-    //     MakeGoal(h, 1750, 125);
-    //     g_playerStartX = 375;
-    //     g_playerStartY = 875;
-    //     MakeButton(h, WT_BTN_TOTITLE, 106, 113, "Title");
-    //     MakeButton(h, WT_BTN_RETRY, 369, 113, "Retry");
-    //     break;
-        
     case 20: /* ステージ20 */
         CreateGameWindow(h, WT_RESIZABLE_NOENTRY, 520, 408, 250, 250, NULL);
         CreateGameWindow(h, WT_MINIMIZABLE, 916, 688, 250, 250, NULL);
@@ -363,7 +345,6 @@ void Stage_Load(HINSTANCE h, int index)
         g_playerStartX = 913;
         g_playerStartY = 813;
         MakeButton(h, WT_BTN_TOTITLE, 850, 500, "Title");
-        g_isTitleStage = 1;
         break;
 
     case 24: /* ステージ24 -- デスクトップアイコンを足場として使う。

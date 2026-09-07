@@ -7,13 +7,13 @@
 #include "noentry.h"
 #include "zorder.h"
 #include "desktopicon.h"
+#include "stage.h"
 #include <stdio.h>
 #include <stdlib.h>
 
 int g_requestTest = 0;
 
 #define EDITOR_DEFAULT_SIZE 250
-#define EDITOR_GOAL_SIZE 64
 #define PALETTE_DRAG_ALPHA 170 /* ドラッグ中の半透明度(0-255、小さいほど透明) */
 
 /* パレットは正方形アイコンをグリッド状に並べる（ボタンの縦一列ではなく）。 */
@@ -28,11 +28,11 @@ int g_requestTest = 0;
 #define TOOLBAR_BTN_H 34
 #define TOOLBAR_GAP 4
 
-/* ドロップ時のTitle/Retryボタンの実サイズ。stage.cのMakeButton(BTN_W/BTN_H)と
-   一致させ、実際のステージで使われるのと同じ見た目・当たり判定で試せるように
-   する（他の窓種別のような正方形EDITOR_DEFAULT_SIZEにはしない）。 */
-#define EDITOR_BTN_W 150
-#define EDITOR_BTN_H 40
+/* ドロップ時のTitle/Retryボタン、およびGoalの実サイズはstage.hのBTN_W/BTN_H/
+   GOAL_SIZEをそのまま使う -- 実際のステージで使われるのと同じ見た目・
+   当たり判定で試せるようにする（他の窓種別のような正方形EDITOR_DEFAULT_SIZE
+   にはしない）。以前はEDITOR_GOAL_SIZE/EDITOR_BTN_W/EDITOR_BTN_Hという
+   独自の複製定義を持ち、stage.c側の値と手動で同期する前提になっていた。 */
 
 /* 配置待ち（半透明の仮状態）アイテムの右下角にある、大きさ調整用の当たり
    判定領域の一辺の長さ。見た目上のハンドル表示は行わず、座標判定のみ。 */
@@ -185,17 +185,17 @@ void Editor_LoadTestStage(HINSTANCE hInstance)
 
 /* ドラッグ中のアイコンの実サイズ。配置先に実際どの大きさで置かれるかが
    一目で分かるよう、待機時の小さなアイコンではなく実配置サイズまで拡大する。
-   Title/Retryボタンはstage.cのMakeButtonと同じ150x40、Goalは正方形の
-   EDITOR_GOAL_SIZE、プレイヤー開始位置は実際のプレイヤーと同じPLAYER_SIZE、
-   それ以外（NoEntry Zoneを含む）は正方形のEDITOR_DEFAULT_SIZE。 */
+   Title/RetryボタンとGoalはstage.hのBTN_W/BTN_H/GOAL_SIZE（stage.cの
+   MakeButton/MakeGoalと同じ値）、プレイヤー開始位置は実際のプレイヤーと
+   同じPLAYER_SIZE、それ以外（NoEntry Zoneを含む）は正方形のEDITOR_DEFAULT_SIZE。 */
 static SIZE DragFullSize(WindowKind kind, int isPlayerStart)
 {
     if (isPlayerStart)
         return (SIZE){PLAYER_SIZE, PLAYER_SIZE};
     if (kind == WT_GOAL)
-        return (SIZE){EDITOR_GOAL_SIZE, EDITOR_GOAL_SIZE};
+        return (SIZE){GOAL_SIZE, GOAL_SIZE};
     if (kind == WT_BTN_TOTITLE || kind == WT_BTN_RETRY)
-        return (SIZE){EDITOR_BTN_W, EDITOR_BTN_H};
+        return (SIZE){BTN_W, BTN_H};
     return (SIZE){EDITOR_DEFAULT_SIZE, EDITOR_DEFAULT_SIZE};
 }
 

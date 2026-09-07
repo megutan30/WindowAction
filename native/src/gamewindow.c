@@ -40,7 +40,7 @@ GameWindowData *GetWindowData(int index)
     return &g_windows[index];
 }
 
-static int IsButtonKind(WindowKind kind)
+int IsButtonWindowKind(WindowKind kind)
 {
     if (kind == WT_BTN_START || kind == WT_BTN_RETRY || kind == WT_BTN_TOTITLE || kind == WT_BTN_EXIT)
         return 1;
@@ -51,18 +51,16 @@ static int IsButtonKind(WindowKind kind)
     return 0;
 }
 
-int IsButtonWindowKind(WindowKind kind) { return IsButtonKind(kind); }
-
 int IsQueryableWindow(WindowKind kind)
 {
-    return !IsButtonKind(kind) && kind != WT_GOAL;
+    return !IsButtonWindowKind(kind) && kind != WT_GOAL;
 }
 
 /* Goal/ボタンはウィンドウクロームを持たない（元々枠なしのUI要素）。
    それ以外の全種別はゲーム描画のタイトルバーを持つ。 */
 static int HasChrome(WindowKind kind)
 {
-    return kind != WT_GOAL && !IsButtonKind(kind);
+    return kind != WT_GOAL && !IsButtonWindowKind(kind);
 }
 
 /* kind別のデフォルト配色/solid/isNoEntryを返す。CreateGameWindowIndexedの
@@ -255,7 +253,7 @@ void Button_UpdateParent(void)
     for (int i = 0; i < g_windowCount; i++)
     {
         GameWindowData *btn = &g_windows[i];
-        if (!IsButtonKind(btn->kind) || !btn->hwnd || btn->minimized)
+        if (!IsButtonWindowKind(btn->kind) || !btn->hwnd || btn->minimized)
             continue;
 #ifdef ENABLE_STAGE_EDITOR
         /* パレットアイコン/ツールバーボタンはエディター画面上の固定UIであり、
@@ -958,7 +956,7 @@ static LRESULT CALLBACK GameWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
             }
 #endif
             ZOrder_BringToFront(hwnd);
-            if (IsButtonKind(g_windows[index].kind))
+            if (IsButtonWindowKind(g_windows[index].kind))
                 Strategy_HandleButtonClick(g_windows[index].kind);
             else
                 Strategy_HandleMouseDown(index);
@@ -1095,7 +1093,7 @@ int CreateGameWindowIndexed(HINSTANCE hInstance, WindowKind kind, int x, int y, 
         style = WS_POPUP | WS_VISIBLE;
         exStyle = WS_EX_LAYERED;
     }
-    else if (IsButtonKind(kind))
+    else if (IsButtonWindowKind(kind))
     {
         /* GameButton.InitializeButtonはFormBorderStyle.Noneを設定する -- ゴールと
            同様に枠なし。ここでWS_BORDERを付けると、オリジナルには枠が無いのに
@@ -1335,7 +1333,7 @@ static void StartMinimizeAnimSubtree(int rootIndex)
     for (int i = 0; i < root->childCount; i++)
     {
         GameWindowData *child = GetWindowData(root->childIdx[i]);
-        if (!child || IsButtonKind(child->kind))
+        if (!child || IsButtonWindowKind(child->kind))
             continue;
         StartMinimizeAnim(child);
         StartMinimizeAnimSubtree(root->childIdx[i]);

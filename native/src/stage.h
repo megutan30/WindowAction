@@ -11,12 +11,19 @@
    更新すること。 */
 #define TOTAL_STAGES 25
 
+/* Goal/ボタンの既定サイズ。editor.cのパレット項目（実際に配置される種別と
+   同じ見た目にするための仮アイコン）もこれと同じ寸法にする必要があるため、
+   ここで共有し二重管理を避ける（以前はeditor.c側にEDITOR_GOAL_SIZE等の
+   独自定義があり、値をここと手動で同期する前提になっていた）。 */
+#define GOAL_SIZE 64
+#define BTN_W 150
+#define BTN_H 40
+
 void Stage_Load(HINSTANCE hInstance, int index);
 int Stage_Count(void);
 int Stage_HasGoal(void);
 RECT Stage_GetGoalBounds(void);
 void Stage_GetPlayerStart(int *x, int *y);
-int Stage_IsTitleStage(void);
 int Stage_Current(void);
 
 /* CurrentStage.EnableDesktopIconsと一致: trueならプレイヤーの接地判定が

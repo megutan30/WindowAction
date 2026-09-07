@@ -11,7 +11,7 @@ int WindowQuery_RectsOverlap(RECT a, RECT b)
     return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
 }
 
-int WindowQuery_FullyContains(RECT outer, RECT inner)
+static int WindowQuery_FullyContains(RECT outer, RECT inner)
 {
     /* WindowCollisionDetector.IsWindowContainedWithinBoundsに合わせた厳密な不等号:
        辺が接しているだけでは内包とみなさない（境界でのジッターを防ぐ）。 */

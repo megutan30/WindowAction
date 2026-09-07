@@ -16,7 +16,6 @@ int WindowQuery_GetTopWindowAt(RECT bounds, int currentParentIdx);
 /* スクリーン座標系のクライアント矩形（タイトルバーと枠を除く）。 */
 void WindowQuery_GetClientBounds(int index, RECT *out);
 
-int WindowQuery_FullyContains(RECT outer, RECT inner);
 int WindowQuery_RectsOverlap(RECT a, RECT b);
 
 /* WindowManager.CalculateMovableRegionと一致: 現在のウィンドウ自身の
