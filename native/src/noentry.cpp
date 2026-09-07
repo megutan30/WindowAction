@@ -153,10 +153,10 @@ int NoEntry_GetBoundaryRects(int windowIndex, RECT out[4])
     GetWindowFullBounds(data->hwnd, &b);
     int bw = NOENTRY_BOUNDARY_WIDTH;
 
-    out[0] = (RECT){b.left, b.top, b.right, b.top + bw};                 /* 上 */
-    out[1] = (RECT){b.left, b.bottom - bw, b.right, b.bottom};           /* 下 */
-    out[2] = (RECT){b.left, b.top, b.left + bw, b.bottom};               /* 左 */
-    out[3] = (RECT){b.right - bw, b.top, b.right, b.bottom};             /* 右 */
+    out[0] = RECT{b.left, b.top, b.right, b.top + bw};                 /* 上 */
+    out[1] = RECT{b.left, b.bottom - bw, b.right, b.bottom};           /* 下 */
+    out[2] = RECT{b.left, b.top, b.left + bw, b.bottom};               /* 左 */
+    out[3] = RECT{b.right - bw, b.top, b.right, b.bottom};             /* 右 */
     return 4;
 }
 

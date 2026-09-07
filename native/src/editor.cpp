@@ -191,12 +191,12 @@ void Editor_LoadTestStage(HINSTANCE hInstance)
 static SIZE DragFullSize(WindowKind kind, int isPlayerStart)
 {
     if (isPlayerStart)
-        return (SIZE){PLAYER_SIZE, PLAYER_SIZE};
+        return SIZE{PLAYER_SIZE, PLAYER_SIZE};
     if (kind == WT_GOAL)
-        return (SIZE){GOAL_SIZE, GOAL_SIZE};
+        return SIZE{GOAL_SIZE, GOAL_SIZE};
     if (kind == WT_BTN_TOTITLE || kind == WT_BTN_RETRY)
-        return (SIZE){BTN_W, BTN_H};
-    return (SIZE){EDITOR_DEFAULT_SIZE, EDITOR_DEFAULT_SIZE};
+        return SIZE{BTN_W, BTN_H};
+    return SIZE{EDITOR_DEFAULT_SIZE, EDITOR_DEFAULT_SIZE};
 }
 
 /* ドロップ時に生成するウィンドウの初期表示テキスト。TextDisplay等ほとんどの

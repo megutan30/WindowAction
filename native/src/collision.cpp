@@ -308,8 +308,8 @@ SIZE Collision_ValidateSizeFromAnchor(POINT anchor, int flipX, int flipY,
     if (isGrowingW)
     {
         RECT xResize = flipX
-            ? (RECT){anchor.x - proposed.cx, curVisTop, anchor.x, curVisTop + currentAbs.cy}
-            : (RECT){anchor.x, curVisTop, anchor.x + proposed.cx, curVisTop + currentAbs.cy};
+            ? RECT{anchor.x - proposed.cx, curVisTop, anchor.x, curVisTop + currentAbs.cy}
+            : RECT{anchor.x, curVisTop, anchor.x + proposed.cx, curVisTop + currentAbs.cy};
         int best = proposed.cx;
         for (int i = 0; i < n; i++)
         {
@@ -330,8 +330,8 @@ SIZE Collision_ValidateSizeFromAnchor(POINT anchor, int flipX, int flipY,
     if (isGrowingH)
     {
         RECT yResize = flipY
-            ? (RECT){curVisLeft, anchor.y - proposed.cy, curVisLeft + effectiveW, anchor.y}
-            : (RECT){curVisLeft, anchor.y, curVisLeft + effectiveW, anchor.y + proposed.cy};
+            ? RECT{curVisLeft, anchor.y - proposed.cy, curVisLeft + effectiveW, anchor.y}
+            : RECT{curVisLeft, anchor.y, curVisLeft + effectiveW, anchor.y + proposed.cy};
         int best = proposed.cy;
         for (int i = 0; i < n; i++)
         {

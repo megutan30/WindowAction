@@ -33,10 +33,11 @@ if errorlevel 1 (
 )
 
 rem /utf-8: interpret sources as UTF-8 (avoids C4819 warnings and mojibake in generated output)
-cl.exe /nologo /utf-8 /W3 /O1 /GL /MT /std:c17 /DWIN32_LEAN_AND_MEAN %DEVDEFINE% ^
-    src\main.c src\gamewindow.c src\player.c src\zorder.c src\noentry.c ^
-    src\collision.c src\hierarchy.c src\strategy.c src\stage.c src\windowquery.c ^
-    src\animation.c src\gamefont.c src\editor.c src\desktopicon.c ^
+rem /std:c++17: native/ is now compiled as C++ instead of C (see the plan for the C++ migration)
+cl.exe /nologo /utf-8 /W3 /O1 /GL /MT /std:c++17 /DWIN32_LEAN_AND_MEAN %DEVDEFINE% ^
+    src\main.cpp src\gamewindow.cpp src\player.cpp src\zorder.cpp src\noentry.cpp ^
+    src\collision.cpp src\hierarchy.cpp src\strategy.cpp src\stage.cpp src\windowquery.cpp ^
+    src\animation.cpp src\gamefont.cpp src\editor.cpp src\desktopicon.cpp ^
     /Fo:build\ /Fe:build\WindowAction.exe ^
     /link /LTCG /OPT:REF /OPT:ICF /INCREMENTAL:NO /SUBSYSTEM:WINDOWS ^
     build\resource.res ^
