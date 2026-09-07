@@ -6,6 +6,7 @@
 #include "hierarchy.h"
 #include "noentry.h"
 #include "zorder.h"
+#include "desktopicon.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -109,7 +110,12 @@ void Editor_LoadTestStage(HINSTANCE hInstance)
 
     /* 背景用の全画面ウィンドウは持たない -- 本物のデスクトップがそのまま
        見える/床になる（通常プレイでウィンドウの外にいる場合と同じ挙動、
-       何も置かれていない場所ではプレイヤーは画面下端まで落ちる）。 */
+       何も置かれていない場所ではプレイヤーは画面下端まで落ちる）。デスクトップ
+       が直接見えるテストモードは、デスクトップアイコンとの当たり判定を
+       試すのに最適な場所でもあるため、Stage_DesktopIconsEnabledの値に
+       関わらずここで常に取得し直す（player.cのCheckGroundedNormalは
+       Editor_IsTestStage()中もアイコンを床として扱う）。 */
+    DesktopIcon_Refresh(hInstance);
 
     /* 配置パレット（画面左上にグリッド状、ドラッグ&ドロップ用の小さな
        正方形アイコン）。各アイコンは実際に配置される種別の背景色/マークを
