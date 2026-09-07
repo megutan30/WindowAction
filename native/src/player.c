@@ -4,6 +4,7 @@
 #include "noentry.h"
 #include "windowquery.h"
 #include "zorder.h"
+#include "desktopicon.h"
 #include <math.h>
 #include <stdlib.h>
 #include <limits.h>
@@ -1097,18 +1098,44 @@ static RECT AdjustMovement(RECT oldBounds, RECT target, int parentIdx, int *hitC
     return adj;
 }
 
-/* ---- HandleWindowCollisions（外側のみ）/ HandleButtonCollisions（常に）:
-   交差する各ソリッドウィンドウ/ボタンを完全なボックス（床/天井/壁）として
-   扱う。 ---- */
-
-static RECT BoxCollideAgainst(RECT proposed, RECT current, HWND hwnd, int *hitCeiling, int gravDir)
+/* checkBoundsを覆っているゲームウィンドウが1つでもあれば、そこにある
+   デスクトップアイコンは見えておらず障害物/床として扱わない
+   （DesktopIconManager.IsIconVisibleAtPositionと同じ考え方）。接地判定
+   （足元の細い帯だけを渡す）と水平/垂直の全身衝突（アイコン全体の矩形を
+   渡す）の両方から共用する。isEditorChrome（テストモードのパレット/
+   ツールバー）は実際のゲームプレイ上の障害物ではないため除外する --
+   パレットは画面左上(PALETTE_X/PALETTE_Y=10,10)に配置され、Windowsの
+   実デスクトップアイコンの1列目とほぼ同じ領域に重なるため、除外しないと
+   テストモードでは実質すべてのアイコンが「パレットに隠れている」と
+   誤判定されてしまう（実際に報告された不具合）。 */
+static int IsDesktopIconOccluded(RECT checkBounds)
 {
-    RECT wb;
-    GetWindowFullBounds(hwnd, &wb);
+    for (int w = 0; w < g_windowCount; w++)
+    {
+        if (!g_windows[w].hwnd || g_windows[w].minimized)
+            continue;
+#ifdef ENABLE_STAGE_EDITOR
+        if (g_windows[w].isEditorChrome)
+            continue;
+#endif
+        RECT wb2;
+        GetWindowFullBounds(g_windows[w].hwnd, &wb2);
+        if (RectsOverlap(wb2, checkBounds))
+            return 1;
+    }
+    return 0;
+}
+
+/* ---- HandleWindowCollisions（外側のみ）/ HandleButtonCollisions（常に）/
+   HandleDesktopIconCollisions（外側のみ）: 交差する各ソリッドウィンドウ/
+   ボタン/デスクトップアイコンを完全なボックス（床/天井/壁）として扱う。 ---- */
+
+static RECT BoxCollideAgainstRect(RECT proposed, RECT current, RECT wb, int *hitCeiling, int gravDir)
+{
     /* このガードは、実際のゲームがまずGetIntersectingWindows(adjustedBounds)を
        反復処理することと一致させる -- 以下の各辺のテスト（天井を含む）は、
-       プレイヤーの提案ボックスが実際に重なっているウィンドウにのみ適用され、
-       画面上のどこか同じ高さにあるだけのウィンドウには決して適用されない。 */
+       プレイヤーの提案ボックスが実際に重なっているウィンドウ/アイコンにのみ
+       適用され、画面上のどこか同じ高さにあるだけのものには決して適用されない。 */
     if (!RectsOverlap(proposed, wb))
         return proposed;
 
@@ -1147,6 +1174,13 @@ static RECT BoxCollideAgainst(RECT proposed, RECT current, HWND hwnd, int *hitCe
     return adj;
 }
 
+static RECT BoxCollideAgainst(RECT proposed, RECT current, HWND hwnd, int *hitCeiling, int gravDir)
+{
+    RECT wb;
+    GetWindowFullBounds(hwnd, &wb);
+    return BoxCollideAgainstRect(proposed, current, wb, hitCeiling, gravDir);
+}
+
 static RECT HandleWindowCollisions(RECT proposed, RECT current, int *hitCeiling, int gravDir)
 {
     RECT adjusted = proposed;
@@ -1172,6 +1206,33 @@ static RECT HandleButtonCollisions(RECT proposed, RECT current, int *hitCeiling,
         if (!IsButtonWindowKind(d->kind) || !d->hwnd)
             continue;
         adjusted = BoxCollideAgainst(adjusted, current, d->hwnd, hitCeiling, gravDir);
+    }
+    return adjusted;
+}
+
+/* プレイヤーが外側(parentIdx<0)にいる間、デスクトップアイコンを通常の
+   ゲームウィンドウ(HandleWindowCollisions)と同じソリッドボックスとして
+   扱う -- ウィンドウ内から見て「常に一番奥にある」デスクトップアイコンは
+   本来これまで着地(上面)のみの対応だったが、外に出ている間はウィンドウ
+   同様に側面/下面からもぶつかるようにしてほしいという要望に対応する
+   （実際の報告: 元のC#版もCheckGroundedでの着地のみの実装だったが、
+   今回はネイティブ版独自の拡張として全身衝突に強化する）。IsDesktopIconOccluded
+   で他のゲームウィンドウに隠れているアイコンは除外する（見えていない
+   位置にいきなり衝突してしまうのを防ぐ、CheckGroundedNormalの着地判定と
+   同じ考え方）。 */
+static RECT HandleDesktopIconCollisions(RECT proposed, RECT current, int *hitCeiling, int gravDir)
+{
+    if (!DesktopIcon_IsActiveForCurrentStage())
+        return proposed;
+
+    RECT adjusted = proposed;
+    int n = DesktopIcon_Count();
+    for (int i = 0; i < n; i++)
+    {
+        RECT icon = DesktopIcon_GetBounds(i);
+        if (IsDesktopIconOccluded(icon))
+            continue;
+        adjusted = BoxCollideAgainstRect(adjusted, current, icon, hitCeiling, gravDir);
     }
     return adjusted;
 }
@@ -1364,6 +1425,41 @@ static void CheckGroundedNormal(Player *p, float dt)
     }
 
     RECT currentFeetBounds = {feetX, feetY, feetX + feetW, feetY + GROUND_CHECK_H};
+
+    /* PlayerPhysics.CheckGroundedのデスクトップアイコン判定と同じ位置
+       （通常のウィンドウよりも先、parentIdxの内外を問わない）。テストモード
+       （Editor_IsTestStage、本物のデスクトップがそのまま床になる）中は、
+       Stage_DesktopIconsEnabledの値に関わらず常に有効にする（有効判定は
+       DesktopIcon_IsActiveForCurrentStageに一本化）。
+       nearbyIconsのTake(5)相当は、PlayerPhysics.cs同様「着地条件(足元の
+       5px帯+水平重なり)を満たすアイコンだけ」に対して数える -- sweep(高速
+       落下対応の広い帯)との重なりだけで数えてしまうと、実際には着地できない
+       近くの無関係なアイコンで5件の枠を使い切ってしまい、その先にある
+       本来着地すべきアイコンが一切チェックされず、すり抜けたり乗れたり
+       する挙動になっていた（実際に報告された不具合: 着地できるときと
+       できないときがある）。 */
+    if (DesktopIcon_IsActiveForCurrentStage())
+    {
+        int checked = 0;
+        for (int i = 0; i < DesktopIcon_Count() && checked < 5; i++)
+        {
+            RECT icon = DesktopIcon_GetBounds(i);
+            if (!RectsOverlap(currentFeetBounds, icon))
+                continue;
+            if (playerBottom < icon.top || playerBottom > icon.top + 5 ||
+                playerRight <= icon.left || playerLeft >= icon.right)
+                continue;
+            checked++;
+
+            if (IsDesktopIconOccluded(currentFeetBounds))
+                continue;
+
+            p->grounded = 1;
+            p->y = (float)(icon.top - p->height);
+            p->vy = 0.0f;
+            return;
+        }
+    }
     int idxs[MAX_INTERSECTING];
     int n = GatherIntersectingWindows(sweep, idxs, MAX_INTERSECTING);
 
@@ -1523,7 +1619,13 @@ static void CheckGroundedInverted(Player *p, float dt)
         RECT z = g_noEntryZones[i];
         if (!RectsOverlap(sweep, z))
             continue;
-        if (playerTop <= z.bottom && playerTop >= z.bottom - 5 &&
+        /* 接触許容範囲をz.bottomの片側(z.bottom-5からz.bottomまで)だけに
+           限定していたため、フレーム間のわずかな誤差でz.bottomよりわずかに
+           手前(playerTop > z.bottom)側に留まってしまうケースを取りこぼし、
+           接地しないまま何フレームも足踏みしてしまうことがあった（実際に
+           報告された不具合: 反転重力でウィンドウ裏側にほぼ密着しても接地
+           しない）。z.bottomを中心に対称な許容範囲にする。 */
+        if (playerTop <= z.bottom + 5 && playerTop >= z.bottom - 5 &&
             playerRight > z.left && playerLeft < z.right)
         {
             p->grounded = 1;
@@ -1551,7 +1653,8 @@ static void CheckGroundedInverted(Player *p, float dt)
             RECT visBand;
             if (!NoEntry_GetVisiblePortion(i, sweepPart, &visBand))
                 continue; /* より前面のウィンドウに隠れている */
-            if (playerTop <= visBand.bottom && playerTop >= visBand.bottom - 5 &&
+            /* 上の静的NoEntryZoneと同じ理由で対称な許容範囲にする。 */
+            if (playerTop <= visBand.bottom + 5 && playerTop >= visBand.bottom - 5 &&
                 playerRight > visBand.left && playerLeft < visBand.right)
             {
                 p->grounded = 1;
@@ -1571,7 +1674,8 @@ static void CheckGroundedInverted(Player *p, float dt)
         GetWindowFullBounds(g_windows[i].hwnd, &wb);
         if (!RectsOverlap(sweep, wb))
             continue;
-        if (playerTop <= wb.bottom && playerTop >= wb.bottom - 5 &&
+        /* 上の静的NoEntryZoneと同じ理由で対称な許容範囲にする。 */
+        if (playerTop <= wb.bottom + 5 && playerTop >= wb.bottom - 5 &&
             playerRight > wb.left && playerLeft < wb.right)
         {
             p->grounded = 1;
@@ -1595,7 +1699,8 @@ static void CheckGroundedInverted(Player *p, float dt)
             RECT wb;
             GetWindowFullBounds(d->hwnd, &wb);
             int contactY = FloorContactY(d, wb);
-            if (playerTop > contactY || playerTop < contactY - 5 ||
+            /* 上の静的NoEntryZoneと同じ理由で対称な許容範囲にする。 */
+            if (playerTop > contactY + 5 || playerTop < contactY - 5 ||
                 playerRight <= wb.left || playerLeft >= wb.right)
                 continue;
 
@@ -1956,6 +2061,7 @@ void Player_Update(Player *p, float dt)
     {
         int ceil3 = 0;
         proposed = HandleWindowCollisions(proposed, current, &ceil3, gravDir);
+        proposed = HandleDesktopIconCollisions(proposed, current, &ceil3, gravDir);
         if (ceil3)
         {
             p->vy = 0.0f;

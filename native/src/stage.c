@@ -13,6 +13,12 @@ static RECT g_goalBounds;
 static int g_playerStartX, g_playerStartY;
 static int g_isTitleStage = 0;
 static int g_currentStage = -1;
+/* CurrentStage.EnableDesktopIconsと一致: このフラグを立てたステージだけ、
+   プレイヤーの接地判定がデスクトップアイコンを床として扱う
+   （player.cのCheckGroundedNormal/Inverted参照）。デスクトップアイコンの
+   実際の取得・可視化マーカー生成はDesktopIcon_Refresh(main.c)が
+   Stage_DesktopIconsEnabled()を見て行う。 */
+static int g_desktopIconsEnabled = 0;
 
 static void MakeGoal(HINSTANCE h, int x, int y)
 {
@@ -32,6 +38,7 @@ RECT Stage_GetGoalBounds(void) { return g_goalBounds; }
 void Stage_GetPlayerStart(int *x, int *y) { *x = g_playerStartX; *y = g_playerStartY; }
 int Stage_IsTitleStage(void) { return g_isTitleStage; }
 int Stage_Current(void) { return g_currentStage; }
+int Stage_DesktopIconsEnabled(void) { return g_desktopIconsEnabled; }
 
 void Stage_Load(HINSTANCE h, int index)
 {
@@ -41,6 +48,7 @@ void Stage_Load(HINSTANCE h, int index)
     ResetWindowRegistry();
     g_hasGoal = 0;
     g_isTitleStage = 0;
+    g_desktopIconsEnabled = 0;
     g_currentStage = index;
 
     switch (index)
@@ -146,9 +154,9 @@ void Stage_Load(HINSTANCE h, int index)
     case 7: /* ステージ7 -- StageManager.cs自体のこの箇所のラベルは「Stage 13」
                になっている（index 13の本物のStage 13と共有されている、
                コピペミスと思われる）。忠実性を保つためそのまま再現している。 */
-        CreateGameWindow(h, WT_RESIZABLE, 725, 375, 250, 813, NULL);
+        CreateGameWindow(h, WT_RESIZABLE, 725, 375, 250, 713, NULL);
         CreateGameWindow(h, WT_NORMAL_BLACK, 725, 125, 250, 313, NULL);
-        CreateGameWindow(h, WT_TEXT_DISPLAY, 625, 63, 375, 125, "Stage 13");
+        CreateGameWindow(h, WT_TEXT_DISPLAY, 625, 63, 375, 125, "Stage 7");
         MakeGoal(h, 750, 250);
         g_playerStartX = 750;
         g_playerStartY = 938;
@@ -263,16 +271,6 @@ void Stage_Load(HINSTANCE h, int index)
 
     case 17: /* ステージ17 */
         CreateGameWindow(h, WT_MINIMIZABLE, 250, 750, 375, 250, NULL);
-        CreateGameWindow(h, WT_TEXT_DISPLAY, 625, 63, 375, 125, "Stage 17");
-        MakeGoal(h, 750, 925);
-        g_playerStartX = 375;
-        g_playerStartY = 875;
-        MakeButton(h, WT_BTN_TOTITLE, 106, 113, "Title");
-        MakeButton(h, WT_BTN_RETRY, 369, 113, "Retry");
-        break;
-
-    case 18: /* ステージ18 */
-        CreateGameWindow(h, WT_MINIMIZABLE, 250, 750, 375, 250, NULL);
         CreateGameWindow(h, WT_MINIMIZABLE, 750, 750, 375, 250, NULL);
         CreateGameWindow(h, WT_TEXT_DISPLAY, 625, 63, 375, 125, "Stage 18");
         MakeGoal(h, 950, 925);
@@ -282,7 +280,7 @@ void Stage_Load(HINSTANCE h, int index)
         MakeButton(h, WT_BTN_RETRY, 369, 113, "Retry");
         break;
 
-    case 19: /* ステージ19 */
+    case 18: /* ステージ18 */
         CreateGameWindow(h, WT_MINIMIZABLE, 50, 750, 375, 250, NULL);
         CreateGameWindow(h, WT_NORMAL_BLACK, 750, 750, 375, 250, NULL);
         CreateGameWindow(h, WT_TEXT_DISPLAY, 625, 63, 375, 125, "Stage 19");
@@ -295,7 +293,7 @@ void Stage_Load(HINSTANCE h, int index)
         MakeButton(h, WT_BTN_RETRY, 369, 113, "Retry");
         break;
 
-    case 20: /* ステージ20 */
+    case 19: /* ステージ19 */
         CreateGameWindow(h, WT_MINIMIZABLE, 250, 750, 375, 250, NULL);
         CreateGameWindow(h, WT_NORMAL_BLACK, 625, 594, 375, 250, NULL);
         CreateGameWindow(h, WT_NORMAL_BLACK, 875, 438, 375, 250, NULL);
@@ -310,17 +308,52 @@ void Stage_Load(HINSTANCE h, int index)
         MakeButton(h, WT_BTN_RETRY, 369, 113, "Retry");
         break;
 
-    case 21: /* ステージ21 - デスクトップアイコン（未実装、通常のプラットフォームステージとしてプレイされる） */
-        CreateGameWindow(h, WT_MINIMIZABLE, 250, 750, 375, 250, NULL);
-        CreateGameWindow(h, WT_TEXT_DISPLAY, 625, 463, 575, 125, "Stage21 DeskTopIcon");
-        MakeGoal(h, 1750, 125);
-        g_playerStartX = 375;
-        g_playerStartY = 875;
+    // case 21: /* ステージ21 - デスクトップアイコン（未実装、通常のプラットフォームステージとしてプレイされる） */
+    //     CreateGameWindow(h, WT_MINIMIZABLE, 250, 750, 375, 250, NULL);
+    //     CreateGameWindow(h, WT_TEXT_DISPLAY, 625, 463, 575, 125, "Stage21 DeskTopIcon");
+    //     MakeGoal(h, 1750, 125);
+    //     g_playerStartX = 375;
+    //     g_playerStartY = 875;
+    //     MakeButton(h, WT_BTN_TOTITLE, 106, 113, "Title");
+    //     MakeButton(h, WT_BTN_RETRY, 369, 113, "Retry");
+    //     break;
+        
+    case 20: /* ステージ20 */
+        CreateGameWindow(h, WT_RESIZABLE_NOENTRY, 520, 408, 250, 250, NULL);
+        CreateGameWindow(h, WT_MINIMIZABLE, 916, 688, 250, 250, NULL);
+        CreateGameWindow(h, WT_TEXT_DISPLAY, 625, 63, 375, 125, "Stage 21");
+        MakeGoal(h, 607, 487);
+        g_playerStartX = 1021;
+        g_playerStartY = 878;
         MakeButton(h, WT_BTN_TOTITLE, 106, 113, "Title");
         MakeButton(h, WT_BTN_RETRY, 369, 113, "Retry");
         break;
 
-    case 22: /* ゲームクリア */
+    case 21: /* ステージ22 */
+        CreateGameWindow(h, WT_NORMAL_BLACK, 286, 256, 250, 250, NULL);
+        MakeGoal(h, 392, 374);
+        CreateGameWindow(h, WT_UNCONSTRAINED, 612, 693, 434, 279, NULL);
+        CreateGameWindow(h, WT_TEXT_DISPLAY, 625, 63, 375, 125, "Stage 22");
+        g_playerStartX = 717;
+        g_playerStartY = 902;
+        MakeButton(h, WT_BTN_TOTITLE, 106, 113, "Title");
+        MakeButton(h, WT_BTN_RETRY, 369, 113, "Retry");
+        break;
+
+    case 22: /* ステージ23 */
+        MakeGoal(h, 1657, 42);
+        CreateGameWindow(h, WT_UNCONSTRAINED, 342, 423, 347, 300, NULL);
+        CreateGameWindow(h, WT_MINIMIZABLE, 374, 496, 203, 192, NULL);
+        NoEntry_AddZone(h, 5, 125, 672, 126);
+        NoEntry_AddZone(h, 847, 126, 1058, 110);
+        CreateGameWindow(h, WT_TEXT_DISPLAY, 125, 163, 375, 125, "Stage 23");
+        g_playerStartX = 448;
+        g_playerStartY = 628;
+        MakeButton(h, WT_BTN_TOTITLE, 106, 113, "Title");
+        MakeButton(h, WT_BTN_RETRY, 369, 113, "Retry");
+        break;
+
+    case 23: /* ゲームクリア */
         CreateGameWindow(h, WT_NORMAL_BLACK, 625, 750, 625, 188, NULL);
         CreateGameWindow(h, WT_TEXT_DISPLAY, 250, 563, 500, 250, "Game");
         CreateGameWindow(h, WT_TEXT_DISPLAY, 1125, 563, 500, 250, "Clear");
@@ -331,6 +364,27 @@ void Stage_Load(HINSTANCE h, int index)
         g_playerStartY = 813;
         MakeButton(h, WT_BTN_TOTITLE, 850, 500, "Title");
         g_isTitleStage = 1;
+        break;
+
+    case 24: /* ステージ24 -- デスクトップアイコンを足場として使う。
+                当初のステージ21案（上のコメントアウトされたブロック参照）を
+                実際のデスクトップアイコン当たり判定付きで復活させたもの。
+                アイコンの位置は実行環境のデスクトップに依存するため、
+                アイコンが無い/少ない環境でもクリア可能なよう、通常の
+                ウィンドウの飛び石だけでもゴールへ到達できるようにしてある
+                （デスクトップアイコンはあくまで追加の/近道の足場）。 */
+        CreateGameWindow(h, WT_MINIMIZABLE, 250, 750, 375, 250, NULL);
+        CreateGameWindow(h, WT_NORMAL_BLACK, 700, 800, 200, 200, NULL);
+        CreateGameWindow(h, WT_NORMAL_BLACK, 1000, 700, 200, 200, NULL);
+        CreateGameWindow(h, WT_NORMAL_BLACK, 1300, 800, 200, 200, NULL);
+        CreateGameWindow(h, WT_NORMAL_BLACK, 1600, 750, 375, 250, NULL);
+        CreateGameWindow(h, WT_TEXT_DISPLAY, 625, 463, 575, 125, "Stage24 DesktopIcon");
+        MakeGoal(h, 1725, 875);
+        g_playerStartX = 313;
+        g_playerStartY = 813;
+        g_desktopIconsEnabled = 1;
+        MakeButton(h, WT_BTN_TOTITLE, 106, 113, "Title");
+        MakeButton(h, WT_BTN_RETRY, 369, 113, "Retry");
         break;
     }
 

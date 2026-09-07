@@ -8,6 +8,7 @@
 #include "stage.h"
 #include "gamefont.h"
 #include "editor.h"
+#include "desktopicon.h"
 
 static Player g_player;
 
@@ -22,6 +23,16 @@ static void LoadStage(HINSTANCE hInstance, int index)
     Editor_LeaveTestStage();
 #endif
     Stage_Load(hInstance, index);
+
+    /* ステージ切り替え直後の初回取得。以降の追従（アイコンの移動/新規作成/
+       削除の反映）はShell変更通知/レジストリ監視スレッドが検知し、
+       メインループのDesktopIcon_UpdateEventsがそれを受けてやり直す。
+       EnableDesktopIconsが立っていないステージでは古いマーカー/一覧を
+       残さないようClearする。 */
+    if (Stage_DesktopIconsEnabled())
+        DesktopIcon_Refresh(hInstance);
+    else
+        DesktopIcon_Clear();
 
     int sx, sy;
     Stage_GetPlayerStart(&sx, &sy);
@@ -140,6 +151,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     RegisterGameWindowClass(hInstance);
     RegisterPlayerWindowClass(hInstance);
     NoEntry_RegisterWindowClass(hInstance);
+    DesktopIcon_RegisterWindowClass(hInstance);
+    DesktopIcon_InitEventWatchers(hInstance);
 
     CreatePlayerWindow(hInstance, &g_player, 0, 0);
 
@@ -177,6 +190,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             dt = 0.1;
 
         Strategy_UpdateAll((float)dt);
+        DesktopIcon_UpdateEvents(hInstance);
         Player_Update(&g_player, (float)dt);
         Goal_UpdateParent();
         Button_UpdateParent();

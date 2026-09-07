@@ -1,10 +1,7 @@
 @echo off
 setlocal
 
-rem 第1引数に"dev"を指定すると、タイトル画面の「Test」ボタンから入れる
-rem ステージエディター(自由配置のテストステージ)を含む開発ビルドになる。
-rem 引数なし(通常のbuild.bat)は今まで通りの本番ビルドで、エディター関連の
-rem コードは#ifdef ENABLE_STAGE_EDITORによりコンパイル自体されない。
+rem pass "dev" as arg1 for a dev build with the stage editor (ENABLE_STAGE_EDITOR); no arg = release build.
 set DEVDEFINE=
 set BUILD_LABEL=release
 if /i "%~1"=="dev" (
@@ -35,14 +32,15 @@ if errorlevel 1 (
     exit /b 1
 )
 
-cl.exe /nologo /W3 /O1 /GL /MT /std:c17 /DWIN32_LEAN_AND_MEAN %DEVDEFINE% ^
+rem /utf-8: interpret sources as UTF-8 (avoids C4819 warnings and mojibake in generated output)
+cl.exe /nologo /utf-8 /W3 /O1 /GL /MT /std:c17 /DWIN32_LEAN_AND_MEAN %DEVDEFINE% ^
     src\main.c src\gamewindow.c src\player.c src\zorder.c src\noentry.c ^
     src\collision.c src\hierarchy.c src\strategy.c src\stage.c src\windowquery.c ^
-    src\animation.c src\gamefont.c src\editor.c ^
+    src\animation.c src\gamefont.c src\editor.c src\desktopicon.c ^
     /Fo:build\ /Fe:build\WindowAction.exe ^
     /link /LTCG /OPT:REF /OPT:ICF /INCREMENTAL:NO /SUBSYSTEM:WINDOWS ^
     build\resource.res ^
-    user32.lib gdi32.lib kernel32.lib dwmapi.lib
+    user32.lib gdi32.lib kernel32.lib dwmapi.lib advapi32.lib
 
 if errorlevel 1 (
     echo Build failed
