@@ -157,30 +157,26 @@ static void EnsureOrigBoundsForGeneration(GameWindowData *w, RECT oldRect, RECT 
     w->origSizeGen = g_resizeGeneration;
 }
 
-static void ApplyScaleToGoalIfParented(int rootIndex, RECT oldRect, RECT newRect, float scaleX, float scaleY,
-                                        int minSize, int maxSize)
+/* ApplyScaleToGoalIfParented/ApplyScaleToButtonsIfParented共通の本体:
+   （インデックス確定後の）1件分のスケール追従を行う。以前はGoal用と
+   Button用でほぼ同一の「基準確立→clamp→位置計算→親内クランプ→反映」の
+   列が別々に書かれていた。 */
+static void ApplyScaleToSpecialChild(GameWindowData *w, RECT oldRect, RECT newRect, float scaleX, float scaleY,
+                                      int minSize, int maxSize)
 {
-    int goalIdx = FindGoalIndex();
-    if (goalIdx < 0)
-        return;
-    GameWindowData *goal = &g_windows[goalIdx];
-    if (goal->parentIdx != rootIndex || !goal->hwnd || goal->minimized)
-        return;
+    EnsureOrigBoundsForGeneration(w, oldRect, newRect, scaleX, scaleY);
+    RECT origRect = w->origBoundsAtResizeStart;
 
-    EnsureOrigBoundsForGeneration(goal, oldRect, newRect, scaleX, scaleY);
-    RECT goalOldRect = goal->origBoundsAtResizeStart;
-
-    /* 以前はサイズ上限・下限として常にGoal自身の固定値(20x20)を使っていた
-       が、これは呼び出し元(UpdateResizable/UpdateUnconstrained)がrootIndex
-       自身の子に課すminSize/maxSizeと無関係だった。制限なしリサイズ
-       (UNCONSTRAINED_MIN_ABS_SIZE=20)ならたまたま一致して問題にならないが、
-       通常の子ウィンドウ・プレイヤーと同じminSize/maxSizeを使わないと、
-       室内がその制限まで縮んでも辻褄が合わなくなる不整合が起きうる
-       （実際に報告された不具合: 制限なしリサイズウィンドウの子のとき、
-       プレイヤーやウィンドウのようにならない）。通常の子ウィンドウ
+    /* 以前はサイズ上限・下限としてGoal/ボタン自身の固定値(20x20や150x40)を
+       使っていたが、これは呼び出し元(UpdateResizable/UpdateUnconstrained)が
+       rootIndex自身の子に課すminSize/maxSizeと無関係だった。通常の
+       子ウィンドウ・プレイヤーと同じminSize/maxSizeを使わないと、室内が
+       その制限まで縮んでも辻褄が合わなくなる不整合が起きうる（実際に
+       報告された不具合: 制限なしリサイズウィンドウの子のとき、プレイヤーや
+       ウィンドウのようにならない）。通常の子ウィンドウ
        (Hierarchy_ApplyRelativeTransform本体)と全く同じclampを使う。 */
-    int newW = RoundToNearest((float)(goalOldRect.right - goalOldRect.left) * scaleX);
-    int newH = RoundToNearest((float)(goalOldRect.bottom - goalOldRect.top) * scaleY);
+    int newW = RoundToNearest((float)(origRect.right - origRect.left) * scaleX);
+    int newH = RoundToNearest((float)(origRect.bottom - origRect.top) * scaleY);
     if (newW < minSize)
         newW = minSize;
     if (newW > maxSize)
@@ -189,17 +185,17 @@ static void ApplyScaleToGoalIfParented(int rootIndex, RECT oldRect, RECT newRect
         newH = minSize;
     if (newH > maxSize)
         newH = maxSize;
-    int newX = newRect.left + RoundToNearest((float)(goalOldRect.left - oldRect.left) * scaleX);
-    int newY = newRect.top + RoundToNearest((float)(goalOldRect.top - oldRect.top) * scaleY);
+    int newX = newRect.left + RoundToNearest((float)(origRect.left - oldRect.left) * scaleX);
+    int newY = newRect.top + RoundToNearest((float)(origRect.top - oldRect.top) * scaleY);
 
     /* Player_ApplyParentRelativeTransformのAdjustPositionAfterResizeと同じ
        安全策: スケール追従後の位置が親の現在の矩形をはみ出さないよう、
        その場でクランプし直す。newW/newHは親と同じminSize/maxSizeで
        既にクランプ済みなので親の幅/高さを超えることはなく、このクランプは
        常に親の内側に収まる位置を返せる。これが無いと、丸め誤差や
-       (goalOldRect.left - oldRect.left)がゲスチャー開始時点の相対位置に
+       (origRect.left - oldRect.left)がゲスチャー開始時点の相対位置に
        基づく古い基準のままなことの影響で、親が非常に小さく縮んだ際に
-       Goalが親の外へはみ出して見えることがあった（実際に報告された不具合:
+       はみ出して見えることがあった（実際に報告された不具合:
        プレイヤーやウィンドウと違って途中で縮まなくなり最終的にはみ出る）。 */
     int maxX = newRect.right - newW;
     int maxY = newRect.bottom - newH;
@@ -215,9 +211,21 @@ static void ApplyScaleToGoalIfParented(int rootIndex, RECT oldRect, RECT newRect
     /* SWP_NOREDRAW: 位置とサイズが同時に変わるため、これを付けないとOS側が
        古い内容を新しい位置/サイズへ引き伸ばして即座に描画してしまうことが
        ある（通常の子ウィンドウ/プレイヤーと同じ対策）。 */
-    SetWindowPos(goal->hwnd, NULL, newX, newY, newW, newH, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
-    InvalidateRect(goal->hwnd, NULL, FALSE);
-    UpdateWindow(goal->hwnd);
+    SetWindowPos(w->hwnd, NULL, newX, newY, newW, newH, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+    InvalidateRect(w->hwnd, NULL, FALSE);
+    UpdateWindow(w->hwnd);
+}
+
+static void ApplyScaleToGoalIfParented(int rootIndex, RECT oldRect, RECT newRect, float scaleX, float scaleY,
+                                        int minSize, int maxSize)
+{
+    int goalIdx = FindGoalIndex();
+    if (goalIdx < 0)
+        return;
+    GameWindowData *goal = &g_windows[goalIdx];
+    if (goal->parentIdx != rootIndex || !goal->hwnd || goal->minimized)
+        return;
+    ApplyScaleToSpecialChild(goal, oldRect, newRect, scaleX, scaleY, minSize, maxSize);
 }
 
 static void ApplyScaleToButtonsIfParented(int rootIndex, RECT oldRect, RECT newRect, float scaleX, float scaleY,
@@ -228,43 +236,7 @@ static void ApplyScaleToButtonsIfParented(int rootIndex, RECT oldRect, RECT newR
         GameWindowData *btn = &g_windows[i];
         if (!IsButtonWindowKind(btn->kind) || btn->parentIdx != rootIndex || !btn->hwnd || btn->minimized)
             continue;
-
-        EnsureOrigBoundsForGeneration(btn, oldRect, newRect, scaleX, scaleY);
-        RECT btnOldRect = btn->origBoundsAtResizeStart;
-
-        /* Goalと同じ理由で、ボタン自身の固定値(150x40)ではなく呼び出し元の
-           minSize/maxSizeでclampする -- 以前は制限なしリサイズで室内が
-           150x40よりずっと小さく(最小20px、反転も)なってもボタンだけが
-           150x40で頭打ちのまま縮まなくなり、室内からはみ出して見える
-           不具合があった（実際に報告された不具合）。 */
-        int newW = RoundToNearest((float)(btnOldRect.right - btnOldRect.left) * scaleX);
-        int newH = RoundToNearest((float)(btnOldRect.bottom - btnOldRect.top) * scaleY);
-        if (newW < minSize)
-            newW = minSize;
-        if (newW > maxSize)
-            newW = maxSize;
-        if (newH < minSize)
-            newH = minSize;
-        if (newH > maxSize)
-            newH = maxSize;
-        int newX = newRect.left + RoundToNearest((float)(btnOldRect.left - oldRect.left) * scaleX);
-        int newY = newRect.top + RoundToNearest((float)(btnOldRect.top - oldRect.top) * scaleY);
-
-        /* Goalと同じ安全策: 親の現在の矩形をはみ出さないようクランプする。 */
-        int maxX = newRect.right - newW;
-        int maxY = newRect.bottom - newH;
-        if (newX < newRect.left)
-            newX = newRect.left;
-        if (newX > maxX)
-            newX = maxX;
-        if (newY < newRect.top)
-            newY = newRect.top;
-        if (newY > maxY)
-            newY = maxY;
-
-        SetWindowPos(btn->hwnd, NULL, newX, newY, newW, newH, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
-        InvalidateRect(btn->hwnd, NULL, FALSE);
-        UpdateWindow(btn->hwnd); /* ゴール/子ウィンドウと同じ黒フラッシュ対策 */
+        ApplyScaleToSpecialChild(btn, oldRect, newRect, scaleX, scaleY, minSize, maxSize);
     }
 }
 
@@ -455,7 +427,12 @@ static void PropagateMoveToNestedGoalAndButtons(int index, int dx, int dy)
     }
 }
 
-static void MirrorHwndWithinParent(HWND hwnd, RECT rootBounds, int mirrorX, int mirrorY)
+/* mirrorX/mirrorYで指定された軸について、rootBounds内でhwndを鏡映した
+   新しい位置を計算して実際に移動があれば適用する。移動量(孫への伝播に
+   必要な分)を呼び出し元へ返したい場合はoutDx/outDyにポインタを渡す
+   （不要ならNULLでよい -- Goal/ボタンは自身の子を持たないため伝播が
+   不要）。 */
+static void MirrorHwndWithinParent(HWND hwnd, RECT rootBounds, int mirrorX, int mirrorY, int *outDx, int *outDy)
 {
     RECT cb;
     GetWindowRect(hwnd, &cb);
@@ -465,10 +442,29 @@ static void MirrorHwndWithinParent(HWND hwnd, RECT rootBounds, int mirrorX, int 
         newLeft = rootBounds.left + rootBounds.right - cb.right;
     if (mirrorY)
         newTop = rootBounds.top + rootBounds.bottom - cb.bottom;
-    if (newLeft == cb.left && newTop == cb.top)
+
+    int dx = newLeft - cb.left;
+    int dy = newTop - cb.top;
+    if (outDx)
+        *outDx = dx;
+    if (outDy)
+        *outDy = dy;
+    if (dx == 0 && dy == 0)
         return;
     SetWindowPos(hwnd, NULL, newLeft, newTop, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     InvalidateRect(hwnd, NULL, FALSE);
+}
+
+/* Hierarchy_MirrorDirectChildren専用: インデックスで指定したGoal/ボタンが
+   rootIndexの直接の子として乗っていれば鏡映する。以前はGoal用の単発呼び
+   出しとButtonループ用の呼び出しが、同じ「parentIdx一致・hwnd・非最小化」
+   ガードをそれぞれ個別に書いていた。 */
+static void MirrorSpecialChildIfParented(int idx, int rootIndex, RECT rootBounds, int mirrorX, int mirrorY)
+{
+    GameWindowData *w = &g_windows[idx];
+    if (w->parentIdx != rootIndex || !w->hwnd || w->minimized)
+        return;
+    MirrorHwndWithinParent(w->hwnd, rootBounds, mirrorX, mirrorY, NULL, NULL);
 }
 
 void Hierarchy_MirrorDirectChildren(int rootIndex, RECT rootBounds, int mirrorX, int mirrorY)
@@ -484,17 +480,12 @@ void Hierarchy_MirrorDirectChildren(int rootIndex, RECT rootBounds, int mirrorX,
         Player_MirrorWithinParent(p, rootIndex, rootBounds, mirrorX, mirrorY);
 
     int goalIdx = FindGoalIndex();
-    if (goalIdx >= 0 && g_windows[goalIdx].parentIdx == rootIndex && g_windows[goalIdx].hwnd &&
-        !g_windows[goalIdx].minimized)
-        MirrorHwndWithinParent(g_windows[goalIdx].hwnd, rootBounds, mirrorX, mirrorY);
+    if (goalIdx >= 0)
+        MirrorSpecialChildIfParented(goalIdx, rootIndex, rootBounds, mirrorX, mirrorY);
 
     for (int b = 0; b < g_windowCount; b++)
-    {
-        GameWindowData *btn = &g_windows[b];
-        if (!IsButtonWindowKind(btn->kind) || btn->parentIdx != rootIndex || !btn->hwnd || btn->minimized)
-            continue;
-        MirrorHwndWithinParent(btn->hwnd, rootBounds, mirrorX, mirrorY);
-    }
+        if (IsButtonWindowKind(g_windows[b].kind))
+            MirrorSpecialChildIfParented(b, rootIndex, rootBounds, mirrorX, mirrorY);
 
     for (int i = 0; i < root->childCount; i++)
     {
@@ -504,22 +495,11 @@ void Hierarchy_MirrorDirectChildren(int rootIndex, RECT rootBounds, int mirrorX,
         if (child->kind == WT_GOAL || IsButtonWindowKind(child->kind))
             continue;
 
-        RECT cb;
-        GetWindowRect(child->hwnd, &cb);
-        int newLeft = cb.left;
-        int newTop = cb.top;
-        if (mirrorX)
-            newLeft = rootBounds.left + rootBounds.right - cb.right;
-        if (mirrorY)
-            newTop = rootBounds.top + rootBounds.bottom - cb.bottom;
-
-        int dx = newLeft - cb.left;
-        int dy = newTop - cb.top;
+        int dx, dy;
+        MirrorHwndWithinParent(child->hwnd, rootBounds, mirrorX, mirrorY, &dx, &dy);
         if (dx == 0 && dy == 0)
             continue;
 
-        SetWindowPos(child->hwnd, NULL, newLeft, newTop, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-        InvalidateRect(child->hwnd, NULL, FALSE);
         /* 子自身は鏡映で移動したが、その内部の孫たちは子から見て相対的には
            何も変わっていない -- 子が動いた分だけ平行移動させれば、孫の
            子に対する相対配置は保たれる（孫自身を鏡映する必要はない）。

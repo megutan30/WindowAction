@@ -10,6 +10,23 @@ int g_requestNext = 0;
 int g_requestToTitle = 0;
 int g_requestExit = 0;
 
+/* UpdateMovable専用: `w`(Goal/ボタン)がmovedIndexの祖先チェーンのどこかに
+   親を持っていれば、同じactualDx/actualDyだけ平行移動させる。以前はGoal用
+   の単発呼び出しとButtonループ用の呼び出しが、同じ「祖先チェーンに含む
+   か」ガードと移動処理をそれぞれ個別に書いていた。 */
+static void FollowMovedWindowIfDescendant(GameWindowData *w, int movedIndex, int actualDx, int actualDy)
+{
+    if (w->parentIdx < 0 || w->minimized)
+        return;
+    if (!Hierarchy_ChainContains(w->parentIdx, movedIndex))
+        return;
+    RECT b;
+    GetWindowFullBounds(w->hwnd, &b);
+    SetWindowPos(w->hwnd, NULL, b.left + actualDx, b.top + actualDy, 0, 0,
+                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    InvalidateRect(w->hwnd, NULL, FALSE);
+}
+
 void Strategy_HandleMouseDown(int index)
 {
     GameWindowData *data = GetWindowData(index);
@@ -231,37 +248,18 @@ static void UpdateMovable(int index, GameWindowData *data)
         Hierarchy_PropagateMove(index, actualDx, actualDy);
         Player_FollowParentMove(Player_GetActive(), index, actualDx, actualDy);
 
-        /* Goalは誰のchildIdx[]配列にも入っていないため、Hierarchy_PropagateMove
-           では到達できない -- 代わりにGoal自身の祖先チェーンを辿る。
-           Player_FollowParentMoveと同じ考え方で、単純な平行移動は、
-           ゴールが移動したウィンドウの下にどれだけ深くネストされていても
-           そのまま適用される。 */
+        /* Goal/ボタンは誰のchildIdx[]配列にも入っていないため、
+           Hierarchy_PropagateMoveでは到達できない -- 代わりに自身の祖先
+           チェーンを辿る。Player_FollowParentMoveと同じ考え方で、単純な
+           平行移動は、移動したウィンドウの下にどれだけ深くネストされて
+           いてもそのまま適用される。 */
         int goalIdx = FindGoalIndex();
-        if (goalIdx >= 0 && g_windows[goalIdx].parentIdx >= 0 && !g_windows[goalIdx].minimized &&
-            Hierarchy_ChainContains(g_windows[goalIdx].parentIdx, index))
-        {
-            RECT gb;
-            GetWindowFullBounds(g_windows[goalIdx].hwnd, &gb);
-            SetWindowPos(g_windows[goalIdx].hwnd, NULL, gb.left + actualDx, gb.top + actualDy, 0, 0,
-                         SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-            InvalidateRect(g_windows[goalIdx].hwnd, NULL, FALSE);
-        }
+        if (goalIdx >= 0)
+            FollowMovedWindowIfDescendant(&g_windows[goalIdx], index, actualDx, actualDy);
 
-        /* 現在、移動したウィンドウの下のどこかに親を持つすべてのボタンに
-           ついても同じ考え方を適用する。 */
         for (int b = 0; b < g_windowCount; b++)
-        {
-            GameWindowData *btn = &g_windows[b];
-            if (!IsButtonWindowKind(btn->kind) || btn->parentIdx < 0 || btn->minimized)
-                continue;
-            if (!Hierarchy_ChainContains(btn->parentIdx, index))
-                continue;
-            RECT bb;
-            GetWindowFullBounds(btn->hwnd, &bb);
-            SetWindowPos(btn->hwnd, NULL, bb.left + actualDx, bb.top + actualDy, 0, 0,
-                         SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-            InvalidateRect(btn->hwnd, NULL, FALSE);
-        }
+            if (IsButtonWindowKind(g_windows[b].kind))
+                FollowMovedWindowIfDescendant(&g_windows[b], index, actualDx, actualDy);
 
         InvalidateRect(data->hwnd, NULL, FALSE);
     }

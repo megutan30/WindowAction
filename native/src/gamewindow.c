@@ -219,70 +219,59 @@ static int IsStillInclusivelyContainedByCurrentParent(int parentIdx, RECT bounds
            bounds.right <= pb.right && bounds.bottom <= pb.bottom;
 }
 
-void Goal_UpdateParent(void)
+/* Goal_UpdateParent/Button_UpdateParent共通の本体: インデックス1件分の
+   親子再判定を行う。以前はGoal用とButton用で同じ処理が別々に書かれていた
+   （Buttonはこれをg_windowCount全体のループでフィルタして回すだけ）。
+   isEditorChromeの除外はButtonにしか実質関係しない(パレット/ツールバーの
+   固定UIのみ該当)が、Goalに対して評価しても常に0なので安全に共有できる。 */
+static void UpdateSpecialChildParent(int idx)
 {
-    int goalIdx = FindGoalIndex();
-    if (goalIdx < 0)
+    GameWindowData *w = &g_windows[idx];
+    if (!w->hwnd || w->minimized)
+        return; /* OnRestoreが明示的に再アタッチする; 最小化中は自己追跡しない */
+#ifdef ENABLE_STAGE_EDITOR
+    /* パレットアイコン/ツールバーボタンはエディター画面上の固定UIであり、
+       テストステージ側に配置した（親候補になり得る）ウィンドウの子には
+       ならない -- そうしないと、配置したウィンドウがパレットの上に
+       重なっただけでパレットがその子になってしまい、位置がその
+       ウィンドウの移動に引きずられて動いてしまう（実際に報告された
+       不具合）。 */
+    if (w->isEditorChrome)
         return;
-    GameWindowData *goal = &g_windows[goalIdx];
-    if (!goal->hwnd || goal->minimized)
-        return; /* OnRestoreが明示的に再アタッチする; 最小化中のゴールは自己追跡しない */
+#endif
 
-    RECT gb;
-    GetWindowFullBounds(goal->hwnd, &gb);
-    int newParent = WindowQuery_GetFullyContaining(gb);
+    RECT b;
+    GetWindowFullBounds(w->hwnd, &b);
+    int newParent = WindowQuery_GetFullyContaining(b);
 
-    if (newParent == goal->parentIdx)
+    if (newParent == w->parentIdx)
         return;
 
     /* 厳密な検索では新しい親候補が見つからなかった(-1)が、現在の親がまだ
        （辺の接触を許容する緩い基準で）内包しているなら、誤って親子関係を
        解除しない。新しい親候補が見つかった場合はここを通らないので、
        より前面のウィンドウへの正しい付け替えは妨げられない。 */
-    if (newParent < 0 && IsStillInclusivelyContainedByCurrentParent(goal->parentIdx, gb))
+    if (newParent < 0 && IsStillInclusivelyContainedByCurrentParent(w->parentIdx, b))
         return;
 
-    if (goal->parentIdx >= 0)
-        Hierarchy_Detach(goalIdx);
+    if (w->parentIdx >= 0)
+        Hierarchy_Detach(idx);
     if (newParent >= 0)
-        Hierarchy_Attach(newParent, goalIdx);
+        Hierarchy_Attach(newParent, idx);
+}
+
+void Goal_UpdateParent(void)
+{
+    int goalIdx = FindGoalIndex();
+    if (goalIdx >= 0)
+        UpdateSpecialChildParent(goalIdx);
 }
 
 void Button_UpdateParent(void)
 {
     for (int i = 0; i < g_windowCount; i++)
-    {
-        GameWindowData *btn = &g_windows[i];
-        if (!IsButtonWindowKind(btn->kind) || !btn->hwnd || btn->minimized)
-            continue;
-#ifdef ENABLE_STAGE_EDITOR
-        /* パレットアイコン/ツールバーボタンはエディター画面上の固定UIであり、
-           テストステージ側に配置した（親候補になり得る）ウィンドウの子には
-           ならない -- そうしないと、配置したウィンドウがパレットの上に
-           重なっただけでパレットがその子になってしまい、位置がその
-           ウィンドウの移動に引きずられて動いてしまう（実際に報告された
-           不具合）。 */
-        if (btn->isEditorChrome)
-            continue;
-#endif
-
-        RECT bb;
-        GetWindowFullBounds(btn->hwnd, &bb);
-        int newParent = WindowQuery_GetFullyContaining(bb);
-
-        if (newParent == btn->parentIdx)
-            continue;
-
-        /* Goal_UpdateParentと同じ理由: 厳密な検索で候補が見つからなかった
-           場合のみ、現在の親をそのまま維持してよいか判定する。 */
-        if (newParent < 0 && IsStillInclusivelyContainedByCurrentParent(btn->parentIdx, bb))
-            continue;
-
-        if (btn->parentIdx >= 0)
-            Hierarchy_Detach(i);
-        if (newParent >= 0)
-            Hierarchy_Attach(newParent, i);
-    }
+        if (IsButtonWindowKind(g_windows[i].kind))
+            UpdateSpecialChildParent(i);
 }
 
 COLORREF CalculateOutlineColor(COLORREF bg)
