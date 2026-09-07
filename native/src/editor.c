@@ -489,9 +489,28 @@ static int CompareByZOrder(const void *pa, const void *pb)
     return ZOrder_GetIndex(g_windows[ia].hwnd) - ZOrder_GetIndex(g_windows[ib].hwnd);
 }
 
+/* stage_export.txtを毎回上書きすると、直前のExportで書き出した内容が次の
+   Exportで消えてしまい、少し配置を変えて何度か試した結果を後から見比べたり
+   出し直したりできなかった -- 末尾に連番を付け、既存のファイルを上書きしない
+   最初の番号を使う（実際に要望された挙動）。カレントディレクトリに残った
+   前回セッション分のファイルも数えるため、実行のたびに1から始まるとは
+   限らない。 */
+static void BuildNumberedExportPath(char *out, size_t outSize)
+{
+    for (int n = 1;; n++)
+    {
+        sprintf_s(out, outSize, "stage_export_%d.txt", n);
+        if (GetFileAttributesA(out) == INVALID_FILE_ATTRIBUTES)
+            return;
+    }
+}
+
 void Editor_ExportStage(void)
 {
-    FILE *f = fopen("stage_export.txt", "w");
+    char path[64];
+    BuildNumberedExportPath(path, sizeof(path));
+
+    FILE *f = fopen(path, "w");
     if (!f)
         return;
 
