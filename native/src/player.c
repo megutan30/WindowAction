@@ -1698,6 +1698,35 @@ static void CheckGroundedInverted(Player *p, float dt)
     }
 
     RECT currentHeadBounds = {headX, headY - GROUND_CHECK_H, headX + headW, headY};
+
+    /* CheckGroundedNormalの対称版。以前はここに存在せず、反転重力中は
+       デスクトップアイコンに頭から接触しても天井として扱われない非対称な
+       不具合になっていた（今回のリファクタリング調査で発覚）。天井側の
+       接触面はicon.bottom（アイコン矩形の下端）で、足元版のicon.topに
+       対応する。 */
+    if (DesktopIcon_IsActiveForCurrentStage())
+    {
+        int checked = 0;
+        for (int i = 0; i < DesktopIcon_Count() && checked < 5; i++)
+        {
+            RECT icon = DesktopIcon_GetBounds(i);
+            if (!RectsOverlap(currentHeadBounds, icon))
+                continue;
+            if (playerTop > icon.bottom + GROUND_CONTACT_TOLERANCE || playerTop < icon.bottom - GROUND_CONTACT_TOLERANCE ||
+                playerRight <= icon.left || playerLeft >= icon.right)
+                continue;
+            checked++;
+
+            if (IsDesktopIconOccluded(currentHeadBounds))
+                continue;
+
+            p->grounded = 1;
+            p->y = (float)icon.bottom;
+            p->vy = 0.0f;
+            return;
+        }
+    }
+
     int idxs[MAX_INTERSECTING];
     int n = GatherIntersectingWindows(sweep, idxs, MAX_INTERSECTING);
 
