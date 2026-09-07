@@ -5,6 +5,7 @@
 #include "player.h"
 #include "zorder.h"
 #include "windowquery.h"
+#include "gdiobj.h"
 #include <stdlib.h>
 #include <limits.h>
 
@@ -28,7 +29,7 @@ static int IsNormalWindowVisibleFromExcluded(int windowIndex, int excludeIndex)
     RECT windowBounds;
     GetWindowFullBounds(win->hwnd, &windowBounds);
 
-    HRGN visible = CreateRectRgnIndirect(&windowBounds);
+    GdiHandle<HRGN> visible(CreateRectRgnIndirect(&windowBounds));
     int myZ = ZOrder_GetIndex(win->hwnd);
     int excludeParentIdx = (excludeIndex >= 0) ? g_windows[excludeIndex].parentIdx : -1;
 
@@ -47,14 +48,12 @@ static int IsNormalWindowVisibleFromExcluded(int windowIndex, int excludeIndex)
         if (i != excludeParentIdx && (!g_windows[i].isNoEntry || g_windows[i].minimized))
             continue;
 
-        HRGN coverRgn = CreateRectRgnIndirect(&coverBounds);
+        GdiHandle<HRGN> coverRgn(CreateRectRgnIndirect(&coverBounds));
         CombineRgn(visible, visible, coverRgn, RGN_DIFF);
-        DeleteObject(coverRgn);
     }
 
     RECT box;
     int rgnType = GetRgnBox(visible, &box);
-    DeleteObject(visible);
     return (rgnType != NULLREGION && rgnType != ERROR);
 }
 

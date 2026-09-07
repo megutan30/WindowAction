@@ -1,6 +1,7 @@
 /* Rendering/CustomFonts.cs から移植: PrivateFontCollectionの代わりに
    AddFontMemResourceExを使い、埋め込みリソースからprstart.ttfを読み込む。 */
 #include "gamefont.h"
+#include "gdiobj.h"
 
 #define MAX_CACHED_SIZES 16
 
@@ -46,9 +47,8 @@ static HFONT GetOrCreate(int pointSize, int bold)
         if (g_cache[i].pointSize == pointSize && g_cache[i].bold == bold)
             return g_cache[i].font;
 
-    HDC dc = GetDC(NULL);
+    ScopedWindowDC dc(NULL);
     int height = -MulDiv(pointSize, GetDeviceCaps(dc, LOGPIXELSY), 72);
-    ReleaseDC(NULL, dc);
 
     HFONT font = CreateFontA(height, 0, 0, 0, bold ? FW_BOLD : FW_NORMAL, FALSE, FALSE, FALSE,
                               DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,

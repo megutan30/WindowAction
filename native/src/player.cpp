@@ -5,6 +5,7 @@
 #include "windowquery.h"
 #include "zorder.h"
 #include "desktopicon.h"
+#include "gdiobj.h"
 #include <math.h>
 #include <stdlib.h>
 #include <limits.h>
@@ -109,13 +110,14 @@ static void PaintPlayer(HWND hwnd)
     RECT rc;
     GetClientRect(hwnd, &rc);
 
-    HDC memDC = CreateCompatibleDC(hdc);
-    HBITMAP memBmp = CreateCompatibleBitmap(hdc, rc.right - rc.left, rc.bottom - rc.top);
-    HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, memBmp);
+    ScopedCompatibleDC memDC(hdc);
+    GdiHandle<HBITMAP> memBmp(CreateCompatibleBitmap(hdc, rc.right - rc.left, rc.bottom - rc.top));
+    ScopedSelectObject selectMemBmp(memDC, memBmp);
 
-    HBRUSH keyBrush = CreateSolidBrush(RGB(255, 0, 255));
-    FillRect(memDC, &rc, keyBrush);
-    DeleteObject(keyBrush);
+    {
+        GdiBrush keyBrush(RGB(255, 0, 255));
+        FillRect(memDC, &rc, keyBrush);
+    }
 
     /* PlayerForm.OnPaint: 本体は、クライアント矩形全体ではなくRENDER矩形
        （RENDER_RATIO=1.0 -> 衝突ボックスそのもの）を基準に、アニメーションの
@@ -147,24 +149,22 @@ static void PaintPlayer(HWND hwnd)
     body.right = (LONG)(centerX + visualW / 2.0f);
     body.bottom = (LONG)bottomY;
 
-    HBRUSH bodyBrush = CreateSolidBrush(RGB(174, 214, 241));
-    HPEN outlinePen = CreatePen(PS_SOLID, 4, RGB(52, 73, 94));
-    HBRUSH oldBrush = (HBRUSH)SelectObject(memDC, bodyBrush);
-    HPEN oldPen = (HPEN)SelectObject(memDC, outlinePen);
-    RoundRect(memDC, body.left, body.top, body.right, body.bottom, 16, 16);
-    SelectObject(memDC, oldBrush);
-    SelectObject(memDC, oldPen);
-    DeleteObject(bodyBrush);
-    DeleteObject(outlinePen);
+    {
+        GdiBrush bodyBrush(RGB(174, 214, 241));
+        GdiPen outlinePen(PS_SOLID, 4, RGB(52, 73, 94));
+        ScopedSelectObject selectBrush(memDC, bodyBrush);
+        ScopedSelectObject selectPen(memDC, outlinePen);
+        RoundRect(memDC, body.left, body.top, body.right, body.bottom, 16, 16);
+    }
 
-    HBRUSH eyeBrush = CreateSolidBrush(RGB(52, 73, 94));
-    HBRUSH oldEyeBrush = (HBRUSH)SelectObject(memDC, eyeBrush);
-    float eyeY = bottomY - visualH * 0.6f;
-    float eyeOffset = visualW * 0.2f;
-    float eyeX = (g_activePlayer && g_activePlayer->facingRight) ? (centerX + eyeOffset) : (centerX - eyeOffset);
-    Ellipse(memDC, (int)eyeX - 4, (int)eyeY - 4, (int)eyeX + 4, (int)eyeY + 4);
-    SelectObject(memDC, oldEyeBrush);
-    DeleteObject(eyeBrush);
+    {
+        GdiBrush eyeBrush(RGB(52, 73, 94));
+        ScopedSelectObject selectEyeBrush(memDC, eyeBrush);
+        float eyeY = bottomY - visualH * 0.6f;
+        float eyeOffset = visualW * 0.2f;
+        float eyeX = (g_activePlayer && g_activePlayer->facingRight) ? (centerX + eyeOffset) : (centerX - eyeOffset);
+        Ellipse(memDC, (int)eyeX - 4, (int)eyeY - 4, (int)eyeX + 4, (int)eyeY + 4);
+    }
 
     /* PlayerForm.OnPaintは、本体自身の固定色ボーダーの上に重ねて、親の色に
        基づく追加のアウトラインを描画する。 */
@@ -174,13 +174,10 @@ static void PaintPlayer(HWND hwnd)
         if (parent)
         {
             COLORREF outline = CalculateOutlineColor(parent->bg);
-            HPEN parentPen = CreatePen(PS_SOLID, 5, outline);
-            HPEN oldParentPen = (HPEN)SelectObject(memDC, parentPen);
-            HBRUSH oldParentBrush = (HBRUSH)SelectObject(memDC, GetStockObject(NULL_BRUSH));
+            GdiPen parentPen(PS_SOLID, 5, outline);
+            ScopedSelectObject selectParentPen(memDC, parentPen);
+            ScopedSelectObject selectNullBrush(memDC, GetStockObject(NULL_BRUSH));
             RoundRect(memDC, body.left, body.top, body.right, body.bottom, 16, 16);
-            SelectObject(memDC, oldParentBrush);
-            SelectObject(memDC, oldParentPen);
-            DeleteObject(parentPen);
         }
     }
 
@@ -201,9 +198,8 @@ static void PaintPlayer(HWND hwnd)
            width-1/height-1にすることでその境界列/行も確実に上書きされるが、
            念のためhdc自体も先にカラーキーで塗っておき、それでも残る
            取りこぼし画素があれば黒ではなく透明として抜けるようにする。 */
-        HBRUSH hdcKeyBrush = CreateSolidBrush(RGB(255, 0, 255));
+        GdiBrush hdcKeyBrush(RGB(255, 0, 255));
         FillRect(hdc, &rc, hdcKeyBrush);
-        DeleteObject(hdcKeyBrush);
         StretchBlt(hdc, flipX ? fullW2 - 1 : 0, flipY ? fullH2 - 1 : 0, flipX ? -fullW2 : fullW2, flipY ? -fullH2 : fullH2,
                    memDC, 0, 0, fullW2, fullH2, SRCCOPY);
     }
@@ -211,9 +207,6 @@ static void PaintPlayer(HWND hwnd)
     {
         BitBlt(hdc, 0, 0, fullW2, fullH2, memDC, 0, 0, SRCCOPY);
     }
-    SelectObject(memDC, oldBmp);
-    DeleteObject(memBmp);
-    DeleteDC(memDC);
 
     EndPaint(hwnd, &ps);
 }
@@ -258,23 +251,20 @@ static void CapturePlayerIconicBitmap(Player *p)
     if (w <= 0 || h <= 0)
         return;
 
-    HDC hdcWin = GetDC(p->hwnd);
-    HDC hdcMem = CreateCompatibleDC(hdcWin);
+    ScopedWindowDC hdcWin(p->hwnd);
+    ScopedCompatibleDC hdcMem(hdcWin);
     void *bits = NULL;
-    HBITMAP bmp = CreatePlayerArgbDibSection(hdcWin, w, h, &bits);
+    HBITMAP bmp = CreatePlayerArgbDibSection(hdcWin, w, h, &bits); /* 所有権はp->iconicBitmapへ移るためRAII化しない */
     if (!bmp || !bits)
     {
         if (bmp)
             DeleteObject(bmp);
-        DeleteDC(hdcMem);
-        ReleaseDC(p->hwnd, hdcWin);
         return;
     }
-    HBITMAP oldBmp = (HBITMAP)SelectObject(hdcMem, bmp);
-    BitBlt(hdcMem, 0, 0, w, h, hdcWin, 0, 0, SRCCOPY);
-    SelectObject(hdcMem, oldBmp);
-    DeleteDC(hdcMem);
-    ReleaseDC(p->hwnd, hdcWin);
+    {
+        ScopedSelectObject selectBmp(hdcMem, bmp);
+        BitBlt(hdcMem, 0, 0, w, h, hdcWin, 0, 0, SRCCOPY);
+    }
 
     unsigned char *px = (unsigned char *)bits;
     for (int i = 0; i < w * h; i++)
@@ -297,34 +287,27 @@ static void CapturePlayerIconicBitmap(Player *p)
    直接渡してはならず、呼び出しのたびに複製する。 */
 static HBITMAP CopyPlayerBitmapScaled(HBITMAP src, int srcW, int srcH, int dstW, int dstH)
 {
-    HDC screenDC = GetDC(NULL);
-    HDC srcDC = CreateCompatibleDC(screenDC);
-    HDC dstDC = CreateCompatibleDC(screenDC);
+    ScopedWindowDC screenDC(NULL);
+    ScopedCompatibleDC srcDC(screenDC);
+    ScopedCompatibleDC dstDC(screenDC);
     void *bits = NULL;
-    HBITMAP dstBmp = CreatePlayerArgbDibSection(screenDC, dstW, dstH, &bits);
-    ReleaseDC(NULL, screenDC);
+    HBITMAP dstBmp = CreatePlayerArgbDibSection(screenDC, dstW, dstH, &bits); /* 所有権は呼び出し元(DWM)へ移るためRAII化しない */
     if (!dstBmp)
-    {
-        DeleteDC(srcDC);
-        DeleteDC(dstDC);
         return NULL;
-    }
 
-    HBITMAP oldSrc = (HBITMAP)SelectObject(srcDC, src);
-    HBITMAP oldDst = (HBITMAP)SelectObject(dstDC, dstBmp);
-    if (dstW == srcW && dstH == srcH)
     {
-        BitBlt(dstDC, 0, 0, dstW, dstH, srcDC, 0, 0, SRCCOPY);
+        ScopedSelectObject selectSrc(srcDC, src);
+        ScopedSelectObject selectDst(dstDC, dstBmp);
+        if (dstW == srcW && dstH == srcH)
+        {
+            BitBlt(dstDC, 0, 0, dstW, dstH, srcDC, 0, 0, SRCCOPY);
+        }
+        else
+        {
+            SetStretchBltMode(dstDC, HALFTONE);
+            StretchBlt(dstDC, 0, 0, dstW, dstH, srcDC, 0, 0, srcW, srcH, SRCCOPY);
+        }
     }
-    else
-    {
-        SetStretchBltMode(dstDC, HALFTONE);
-        StretchBlt(dstDC, 0, 0, dstW, dstH, srcDC, 0, 0, srcW, srcH, SRCCOPY);
-    }
-    SelectObject(srcDC, oldSrc);
-    SelectObject(dstDC, oldDst);
-    DeleteDC(srcDC);
-    DeleteDC(dstDC);
 
     /* 通常のBitBlt/StretchBltはアルファチャンネルの意味を理解せず、拡縮の
        過程でアルファ値を保持しない（0にリセットされたり不定値になったり

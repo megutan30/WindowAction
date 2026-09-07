@@ -2,6 +2,7 @@
 #include "gamewindow.h"
 #include "zorder.h"
 #include "windowquery.h"
+#include "gdiobj.h"
 
 #define NOENTRY_BOUNDARY_WIDTH 5
 #define ZONE_STRIPE_WIDTH 20
@@ -23,31 +24,28 @@ static void PaintZone(HWND hwnd)
     RECT rc;
     GetClientRect(hwnd, &rc);
 
-    HDC memDC = CreateCompatibleDC(hdc);
-    HBITMAP memBmp = CreateCompatibleBitmap(hdc, rc.right - rc.left, rc.bottom - rc.top);
-    HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, memBmp);
+    ScopedCompatibleDC memDC(hdc);
+    GdiHandle<HBITMAP> memBmp(CreateCompatibleBitmap(hdc, rc.right - rc.left, rc.bottom - rc.top));
+    ScopedSelectObject selectMemBmp(memDC, memBmp);
 
     /* NoEntryZone_Paint: 幅STRIPE_WIDTH=20の水平帯を、FromArgb(180,Red)と
        FromArgb(180,Black)で交互に下方向へスクロールさせる。GDIには任意の
        背景に対する安価なピクセル単位のアルファ合成手段がないため、
        これらは元の半透明色を単色で近似したもの。 */
     int startY = -((int)g_zoneAnimOffset % ZONE_PATTERN_HEIGHT);
-    HBRUSH redBrush = CreateSolidBrush(RGB(220, 50, 50));
-    HBRUSH darkBrush = CreateSolidBrush(RGB(50, 50, 50));
-    for (int y = startY; y < rc.bottom + ZONE_PATTERN_HEIGHT; y += ZONE_PATTERN_HEIGHT)
     {
-        RECT red = {rc.left, y, rc.right, y + ZONE_STRIPE_WIDTH};
-        RECT dark = {rc.left, y + ZONE_STRIPE_WIDTH, rc.right, y + ZONE_PATTERN_HEIGHT};
-        FillRect(memDC, &red, redBrush);
-        FillRect(memDC, &dark, darkBrush);
+        GdiBrush redBrush(RGB(220, 50, 50));
+        GdiBrush darkBrush(RGB(50, 50, 50));
+        for (int y = startY; y < rc.bottom + ZONE_PATTERN_HEIGHT; y += ZONE_PATTERN_HEIGHT)
+        {
+            RECT red = {rc.left, y, rc.right, y + ZONE_STRIPE_WIDTH};
+            RECT dark = {rc.left, y + ZONE_STRIPE_WIDTH, rc.right, y + ZONE_PATTERN_HEIGHT};
+            FillRect(memDC, &red, redBrush);
+            FillRect(memDC, &dark, darkBrush);
+        }
     }
-    DeleteObject(redBrush);
-    DeleteObject(darkBrush);
 
     BitBlt(hdc, 0, 0, rc.right - rc.left, rc.bottom - rc.top, memDC, 0, 0, SRCCOPY);
-    SelectObject(memDC, oldBmp);
-    DeleteObject(memBmp);
-    DeleteDC(memDC);
 
     EndPaint(hwnd, &ps);
 }
@@ -168,7 +166,7 @@ int NoEntry_GetVisiblePortion(int windowIndex, RECT rect, RECT *outBounds)
         return 0;
 
     int myZ = ZOrder_GetIndex(hwnd);
-    HRGN visible = CreateRectRgnIndirect(&rect);
+    GdiHandle<HRGN> visible(CreateRectRgnIndirect(&rect));
 
     for (int i = 0; i < g_windowCount; i++)
     {
@@ -186,14 +184,12 @@ int NoEntry_GetVisiblePortion(int windowIndex, RECT rect, RECT *outBounds)
 
         RECT coverBounds;
         GetWindowFullBounds(g_windows[i].hwnd, &coverBounds);
-        HRGN coverRgn = CreateRectRgnIndirect(&coverBounds);
+        GdiHandle<HRGN> coverRgn(CreateRectRgnIndirect(&coverBounds));
         CombineRgn(visible, visible, coverRgn, RGN_DIFF);
-        DeleteObject(coverRgn);
     }
 
     RECT box;
     int rgnType = GetRgnBox(visible, &box);
-    DeleteObject(visible);
 
     if (rgnType == NULLREGION || rgnType == ERROR)
         return 0;

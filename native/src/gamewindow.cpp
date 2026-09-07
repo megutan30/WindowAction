@@ -6,6 +6,7 @@
 #include "windowquery.h"
 #include "noentry.h"
 #include "editor.h"
+#include "gdiobj.h"
 #include <stdio.h>
 #include <math.h>
 #include <dwmapi.h>
@@ -343,9 +344,8 @@ static void DrawClockwiseSide(HDC hdc, RECT strip, int horizontal, int forward,
             seg.right = strip.right;
         }
 
-        HBRUSH br = CreateSolidBrush(isRed ? RGB(255, 0, 0) : RGB(30, 30, 30));
+        GdiBrush br(isRed ? RGB(255, 0, 0) : RGB(30, 30, 30));
         FillRect(hdc, &seg, br);
-        DeleteObject(br);
 
         pos += segLength;
     }
@@ -385,8 +385,8 @@ static void DrawMovableMark(HDC hdc, RECT rc, COLORREF color)
     int cx = (rc.left + rc.right) / 2;
     int cy = (rc.top + rc.bottom) / 2;
     int r = MARK_RADIUS;
-    HPEN pen = CreatePen(PS_SOLID, MARK_PEN_WIDTH, color);
-    HPEN old = (HPEN)SelectObject(hdc, pen);
+    GdiPen pen(PS_SOLID, MARK_PEN_WIDTH, color);
+    ScopedSelectObject selectPen(hdc, pen);
 
     MoveToEx(hdc, cx - r, cy, NULL);
     LineTo(hdc, cx + r, cy);
@@ -410,9 +410,6 @@ static void DrawMovableMark(HDC hdc, RECT rc, COLORREF color)
     LineTo(hdc, cx - a, cy + r - a);
     MoveToEx(hdc, cx, cy + r, NULL);
     LineTo(hdc, cx + a, cy + r - a);
-
-    SelectObject(hdc, old);
-    DeleteObject(pen);
 }
 
 static void DrawResizableMark(HDC hdc, RECT rc, COLORREF color)
@@ -420,8 +417,8 @@ static void DrawResizableMark(HDC hdc, RECT rc, COLORREF color)
     int cx = (rc.left + rc.right) / 2;
     int cy = (rc.top + rc.bottom) / 2;
     int r = MARK_RADIUS;
-    HPEN pen = CreatePen(PS_SOLID, MARK_PEN_WIDTH, color);
-    HPEN old = (HPEN)SelectObject(hdc, pen);
+    GdiPen pen(PS_SOLID, MARK_PEN_WIDTH, color);
+    ScopedSelectObject selectPen(hdc, pen);
 
     MoveToEx(hdc, cx - r, cy - r, NULL);
     LineTo(hdc, cx + r, cy + r);
@@ -434,9 +431,6 @@ static void DrawResizableMark(HDC hdc, RECT rc, COLORREF color)
     LineTo(hdc, cx + r - a, cy + r);
     MoveToEx(hdc, cx + r, cy + r, NULL);
     LineTo(hdc, cx + r, cy + r - a);
-
-    SelectObject(hdc, old);
-    DeleteObject(pen);
 }
 
 static void DrawMinimizableMark(HDC hdc, RECT rc, COLORREF color)
@@ -445,10 +439,9 @@ static void DrawMinimizableMark(HDC hdc, RECT rc, COLORREF color)
        ボックス、その中央にbarHeight=markSize/6=10のバーを配置する。 */
     int cx = (rc.left + rc.right) / 2;
     int cy = (rc.top + rc.bottom) / 2;
-    HBRUSH br = CreateSolidBrush(color);
+    GdiBrush br(color);
     RECT bar = {cx - MINIMIZE_BAR_HALF_W, cy - MINIMIZE_BAR_HALF_H, cx + MINIMIZE_BAR_HALF_W, cy + MINIMIZE_BAR_HALF_H};
     FillRect(hdc, &bar, br);
-    DeleteObject(br);
 }
 
 static void DrawDeletableMark(HDC hdc, RECT rc, COLORREF color)
@@ -456,16 +449,13 @@ static void DrawDeletableMark(HDC hdc, RECT rc, COLORREF color)
     int cx = (rc.left + rc.right) / 2;
     int cy = (rc.top + rc.bottom) / 2;
     int r = MARK_RADIUS;
-    HPEN pen = CreatePen(PS_SOLID, MARK_PEN_WIDTH, color);
-    HPEN old = (HPEN)SelectObject(hdc, pen);
+    GdiPen pen(PS_SOLID, MARK_PEN_WIDTH, color);
+    ScopedSelectObject selectPen(hdc, pen);
 
     MoveToEx(hdc, cx - r, cy - r, NULL);
     LineTo(hdc, cx + r, cy + r);
     MoveToEx(hdc, cx + r, cy - r, NULL);
     LineTo(hdc, cx - r, cy + r);
-
-    SelectObject(hdc, old);
-    DeleteObject(pen);
 }
 
 static void DrawGoalMark(HDC hdc, RECT rc)
@@ -487,36 +477,33 @@ static void DrawGoalMark(HDC hdc, RECT rc)
        引き伸ばすことで、見た目のGの外接矩形が常にrc（実際の判定範囲）と
        正確に同じ縦横比になるようにする。 */
     const int REF = 128;
-    HDC refDC = CreateCompatibleDC(hdc);
-    HBITMAP refBmp = CreateCompatibleBitmap(hdc, REF, REF);
-    HBITMAP oldRefBmp = (HBITMAP)SelectObject(refDC, refBmp);
+    ScopedCompatibleDC refDC(hdc);
+    GdiHandle<HBITMAP> refBmp(CreateCompatibleBitmap(hdc, REF, REF));
+    ScopedSelectObject selectRefBmp(refDC, refBmp);
 
     RECT refRc = {0, 0, REF, REF};
-    HBRUSH magentaBrush = CreateSolidBrush(RGB(255, 0, 255));
-    FillRect(refDC, &refRc, magentaBrush);
-    DeleteObject(magentaBrush);
+    {
+        GdiBrush magentaBrush(RGB(255, 0, 255));
+        FillRect(refDC, &refRc, magentaBrush);
+    }
 
     SetBkMode(refDC, TRANSPARENT);
-    HFONT font = CreateFontA((int)(REF * 1.5f), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-                              DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                              DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, "Arial");
-    HFONT oldFont = (HFONT)SelectObject(refDC, font);
-    SetTextColor(refDC, RGB(40, 40, 40));
-    RECT shadow = refRc;
-    OffsetRect(&shadow, 2, 2);
-    DrawTextA(refDC, "G", -1, &shadow, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    SetTextColor(refDC, RGB(255, 215, 0));
-    DrawTextA(refDC, "G", -1, &refRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    SelectObject(refDC, oldFont);
-    DeleteObject(font);
+    {
+        GdiHandle<HFONT> font(CreateFontA((int)(REF * 1.5f), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                                           DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                           DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, "Arial"));
+        ScopedSelectObject selectFont(refDC, font);
+        SetTextColor(refDC, RGB(40, 40, 40));
+        RECT shadow = refRc;
+        OffsetRect(&shadow, 2, 2);
+        DrawTextA(refDC, "G", -1, &shadow, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        SetTextColor(refDC, RGB(255, 215, 0));
+        DrawTextA(refDC, "G", -1, &refRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    }
 
     SetStretchBltMode(hdc, HALFTONE);
     SetBrushOrgEx(hdc, rc.left, rc.top, NULL);
     StretchBlt(hdc, rc.left, rc.top, w, h, refDC, 0, 0, REF, REF, SRCCOPY);
-
-    SelectObject(refDC, oldRefBmp);
-    DeleteObject(refBmp);
-    DeleteDC(refDC);
 }
 
 /* kindに対応するストラテジーマーク（あれば）を描画する。PaintGameWindowの
@@ -548,21 +535,23 @@ static void DrawTitleBar(HDC hdc, RECT rc, GameWindowData *data)
     COLORREF barBg = data->hasCustomAppearance ? data->titleBarBg : RGB(45, 45, 48);
     COLORREF barFg = data->hasCustomAppearance ? data->titleBarFg : RGB(255, 255, 255);
 
-    HBRUSH brush = CreateSolidBrush(barBg);
-    FillRect(hdc, &bar, brush);
-    DeleteObject(brush);
+    {
+        GdiBrush brush(barBg);
+        FillRect(hdc, &bar, brush);
+    }
 
     const char *title = data->hasCustomAppearance && data->titleText[0] != '\0'
                              ? data->titleText
                              : "WindowAction";
+    /* GameFont_Getはキャッシュ済みのHFONTを返す(所有権はgamefont.cpp側)ため、
+       ここではSelectObjectの退避/復元だけ行い、DeleteObjectはしない。 */
     HFONT font = GameFont_Get(11);
-    HFONT oldFont = (HFONT)SelectObject(hdc, font);
+    ScopedSelectObject selectFont(hdc, font);
     SetTextColor(hdc, barFg);
     SetBkMode(hdc, TRANSPARENT);
     RECT textRc = bar;
     textRc.left += 8;
     DrawTextA(hdc, title, -1, &textRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-    SelectObject(hdc, oldFont);
 }
 
 static int IsWindowHovered(int index)
@@ -603,9 +592,9 @@ static void PaintGameWindow(HWND hwnd, int index)
     RECT rc;
     GetClientRect(hwnd, &rc);
 
-    HDC memDC = CreateCompatibleDC(hdc);
-    HBITMAP memBmp = CreateCompatibleBitmap(hdc, rc.right - rc.left, rc.bottom - rc.top);
-    HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, memBmp);
+    ScopedCompatibleDC memDC(hdc);
+    GdiHandle<HBITMAP> memBmp(CreateCompatibleBitmap(hdc, rc.right - rc.left, rc.bottom - rc.top));
+    ScopedSelectObject selectMemBmp(memDC, memBmp);
 
     /* GameButton.Button_PaintはGameWindowとは別に自身の背景を塗りつぶし、
        ホバー時に明るくする: ホバー時はFromArgb(230,230,230)、待機時は
@@ -627,9 +616,10 @@ static void PaintGameWindow(HWND hwnd, int index)
     if (IsButtonWindowKind(data->kind))
         fillColor = IsWindowHovered(index) ? RGB(230, 230, 230) : RGB(200, 200, 200);
 
-    HBRUSH brush = CreateSolidBrush(fillColor);
-    FillRect(memDC, &rc, brush);
-    DeleteObject(brush);
+    {
+        GdiBrush brush(fillColor);
+        FillRect(memDC, &rc, brush);
+    }
 
     int hasChrome = HasChrome(data->kind);
     if (hasChrome)
@@ -692,11 +682,10 @@ static void PaintGameWindow(HWND hwnd, int index)
             font = GameFont_GetBold(14);
         else
             font = GameFont_Get(12);
-        HFONT oldFont = (HFONT)SelectObject(memDC, font);
+        ScopedSelectObject selectFont(memDC, font);
         SetTextColor(memDC, data->fg);
         SetBkMode(memDC, TRANSPARENT);
         DrawTextA(memDC, data->text, -1, &contentRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_WORDBREAK);
-        SelectObject(memDC, oldFont);
     }
 
     if (data->isNoEntry)
@@ -725,13 +714,10 @@ static void PaintGameWindow(HWND hwnd, int index)
             outline = data->hasCustomAppearance ? data->outlineColor : DEFAULT_OUTLINE_COLOR;
             outlineWidth = DEFAULT_OUTLINE_WIDTH_NO_PARENT;
         }
-        HPEN pen = CreatePen(PS_SOLID, outlineWidth, outline);
-        HPEN oldOutlinePen = (HPEN)SelectObject(memDC, pen);
-        HBRUSH oldOutlineBrush = (HBRUSH)SelectObject(memDC, GetStockObject(NULL_BRUSH));
+        GdiPen pen(PS_SOLID, outlineWidth, outline);
+        ScopedSelectObject selectOutlinePen(memDC, pen);
+        ScopedSelectObject selectNullBrush(memDC, GetStockObject(NULL_BRUSH));
         Rectangle(memDC, rc.left, rc.top, rc.right, rc.bottom);
-        SelectObject(memDC, oldOutlineBrush);
-        SelectObject(memDC, oldOutlinePen);
-        DeleteObject(pen);
     }
 
     int w = rc.right - rc.left;
@@ -763,9 +749,6 @@ static void PaintGameWindow(HWND hwnd, int index)
     {
         BitBlt(hdc, 0, 0, w, h, memDC, 0, 0, SRCCOPY);
     }
-    SelectObject(memDC, oldBmp);
-    DeleteObject(memBmp);
-    DeleteDC(memDC);
 
     EndPaint(hwnd, &ps);
 }
@@ -819,15 +802,14 @@ static void CaptureIconicBitmap(GameWindowData *data)
     if (w <= 0 || h <= 0)
         return;
 
-    HDC hdcWin = GetDC(data->hwnd);
-    HDC hdcMem = CreateCompatibleDC(hdcWin);
+    ScopedWindowDC hdcWin(data->hwnd);
+    ScopedCompatibleDC hdcMem(hdcWin);
     void *bits = NULL;
-    HBITMAP bmp = CreateArgbDibSection(hdcWin, w, h, &bits);
-    HBITMAP oldBmp = (HBITMAP)SelectObject(hdcMem, bmp);
-    BitBlt(hdcMem, 0, 0, w, h, hdcWin, 0, 0, SRCCOPY);
-    SelectObject(hdcMem, oldBmp);
-    DeleteDC(hdcMem);
-    ReleaseDC(data->hwnd, hdcWin);
+    HBITMAP bmp = CreateArgbDibSection(hdcWin, w, h, &bits); /* 所有権はdata->iconicBitmapへ移るためRAII化しない */
+    {
+        ScopedSelectObject selectBmp(hdcMem, bmp);
+        BitBlt(hdcMem, 0, 0, w, h, hdcWin, 0, 0, SRCCOPY);
+    }
 
     /* GoalはSetLayeredWindowAttributes(..., RGB(255,0,255), LWA_COLORKEY)で
        マゼンタ画素を透過させているが、これは実際の画面合成時にDWMが行う
@@ -863,27 +845,25 @@ static void CaptureIconicBitmap(GameWindowData *data)
    dataIconicBitmap自身を直接渡してはならず、呼び出しのたびに複製する。 */
 static HBITMAP CopyBitmapScaled(HBITMAP src, int srcW, int srcH, int dstW, int dstH)
 {
-    HDC screenDC = GetDC(NULL);
-    HDC srcDC = CreateCompatibleDC(screenDC);
-    HDC dstDC = CreateCompatibleDC(screenDC);
-    HBITMAP dstBmp = CreateArgbDibSection(screenDC, dstW, dstH, NULL);
-    ReleaseDC(NULL, screenDC);
+    HBITMAP dstBmp;
+    {
+        ScopedWindowDC screenDC(NULL);
+        ScopedCompatibleDC srcDC(screenDC);
+        ScopedCompatibleDC dstDC(screenDC);
+        dstBmp = CreateArgbDibSection(screenDC, dstW, dstH, NULL); /* 所有権は呼び出し元(DWM)へ移るためRAII化しない */
 
-    HBITMAP oldSrc = (HBITMAP)SelectObject(srcDC, src);
-    HBITMAP oldDst = (HBITMAP)SelectObject(dstDC, dstBmp);
-    if (dstW == srcW && dstH == srcH)
-    {
-        BitBlt(dstDC, 0, 0, dstW, dstH, srcDC, 0, 0, SRCCOPY);
+        ScopedSelectObject selectSrc(srcDC, src);
+        ScopedSelectObject selectDst(dstDC, dstBmp);
+        if (dstW == srcW && dstH == srcH)
+        {
+            BitBlt(dstDC, 0, 0, dstW, dstH, srcDC, 0, 0, SRCCOPY);
+        }
+        else
+        {
+            SetStretchBltMode(dstDC, HALFTONE);
+            StretchBlt(dstDC, 0, 0, dstW, dstH, srcDC, 0, 0, srcW, srcH, SRCCOPY);
+        }
     }
-    else
-    {
-        SetStretchBltMode(dstDC, HALFTONE);
-        StretchBlt(dstDC, 0, 0, dstW, dstH, srcDC, 0, 0, srcW, srcH, SRCCOPY);
-    }
-    SelectObject(srcDC, oldSrc);
-    SelectObject(dstDC, oldDst);
-    DeleteDC(srcDC);
-    DeleteDC(dstDC);
     return dstBmp;
 }
 

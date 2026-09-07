@@ -3,6 +3,7 @@
 #ifdef ENABLE_STAGE_EDITOR
 #include "editor.h"
 #endif
+#include "gdiobj.h"
 #include <commctrl.h>
 
 /* ---- 可視化オーバーレイ: アイコン1個につき1枚のマーカーウィンドウを
@@ -27,15 +28,16 @@ static void PaintOverlay(HWND hwnd)
 
     /* マゼンタでまず塗りつぶし、LWA_COLORKEYで透過させる（枠線の内側は
        完全に透明になり、アイコンの見た目自体を隠さない）。 */
-    HBRUSH bg = CreateSolidBrush(RGB(255, 0, 255));
-    FillRect(hdc, &rc, bg);
-    DeleteObject(bg);
+    {
+        GdiBrush bg(RGB(255, 0, 255));
+        FillRect(hdc, &rc, bg);
+    }
 
     if (g_iconCount > 0)
     {
-        HPEN pen = CreatePen(PS_SOLID, 3, RGB(60, 220, 60));
-        HPEN oldPen = (HPEN)SelectObject(hdc, pen);
-        HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
+        GdiPen pen(PS_SOLID, 3, RGB(60, 220, 60));
+        ScopedSelectObject selectPen(hdc, pen);
+        ScopedSelectObject selectNullBrush(hdc, GetStockObject(NULL_BRUSH));
 
         /* g_iconsはスクリーン座標だが、ウィンドウ自体が仮想画面の原点
            (負値になり得るマルチモニタ座標)へ配置されているため、その原点
@@ -47,10 +49,6 @@ static void PaintOverlay(HWND hwnd)
             RECT r = g_icons[i];
             Rectangle(hdc, r.left - ox, r.top - oy, r.right - ox, r.bottom - oy);
         }
-
-        SelectObject(hdc, oldBrush);
-        SelectObject(hdc, oldPen);
-        DeleteObject(pen);
     }
 
     EndPaint(hwnd, &ps);
