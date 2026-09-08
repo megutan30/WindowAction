@@ -29,8 +29,13 @@ static void FollowMovedWindowIfDescendant(GameWindowData *w, int movedIndex, int
 
 /* 以前はここに種別ごとのswitch文があったが、各処理はMovableWindow/
    ResizableWindow/UnconstrainedWindow/MinimizableWindowのOnMouseDown
-   オーバーライドへ移した(内容は変更していない)。それ以外の種別は
-   基底クラスのno-op実装(switch文のdefault:break;に相当)がそのまま呼ばれる。 */
+   オーバーライドへ分かれていた。コンポーネント化により1つのウィンドウが
+   複数のcapabilities(移動+リサイズ等)を同時に持てるようになったため、
+   単一継承の派生クラスでは表現できなくなり、GameWindowData自身の
+   1本のメソッドへ統合した。最小化はウィンドウ全体クリックでの
+   トグルをやめ、専用ボタン(GameWindowProcのWM_LBUTTONDOWN、
+   GetMinimizeButtonRect参照)だけで行うようにしたため、ここには
+   最小化の分岐が無い。 */
 void Strategy_HandleMouseDown(int index)
 {
     GameWindowData *data = GetWindowData(index);
@@ -39,79 +44,88 @@ void Strategy_HandleMouseDown(int index)
     data->OnMouseDown(index);
 }
 
-void MovableWindow::OnMouseDown(int index)
+void GameWindowData::OnMouseDown(int index)
 {
-    dragging = 1;
-    SetCapture(hwnd);
-    /* window.PointToClient(Cursor.Position)相当: 画面絶対座標そのままでは
-       なく、その時点のウィンドウ左上を基準にした相対座標で記録する
-       （UpdateMovable参照 -- この基準の動的な取り直しが、ドラッグ開始位置
-       からの累積差分を絶対目標位置へ正しく収束させるために必須）。 */
-    POINT curAbs;
-    GetCursorPos(&curAbs);
-    RECT outer0;
-    GetWindowRect(hwnd, &outer0);
-    lastMouse.x = curAbs.x - outer0.left;
-    lastMouse.y = curAbs.y - outer0.top;
-    blockedL = blockedR = blockedU = blockedD = 0;
-}
+    /* 片軸のみ(X軸のみ/Y軸のみ)のリサイズ能力は、ウィンドウ全体ではなく
+       該当する縁（当たり判定はGetResizeEdgeZoneRight/Bottom、GameWindowProcの
+       WM_SETCURSORと共通）をつかんだ場合だけリサイズを開始する（実際に
+       要望された挙動）。両軸を持つ場合はwantResizeが常に真のまま従来通り
+       ウィンドウ全体のクリックでリサイズを開始する。縁をつかんだ場合は
+       Move能力を同時に持っていても移動を開始させない
+       （suppressMove）-- そうしないと以前のようにdragging/resizingが
+       同時に立ち、Strategy_UpdateAllのif/else-if順で常に移動が優先されて
+       しまい、縁をつかんだ意図（リサイズ）が実現できない。 */
+    int resizeX = HasCapability(capabilities, WC_RESIZE_X);
+    int resizeY = HasCapability(capabilities, WC_RESIZE_Y);
+    int wantResize = resizeX || resizeY;
+    int suppressMove = 0;
 
-void ResizableWindow::OnMouseDown(int index)
-{
-    resizing = 1;
-    SetCapture(hwnd);
-    GetCursorPos(&resizeDragStart);
-    RECT r;
-    GetWindowRect(hwnd, &r);
-    resizeOrigSize.cx = r.right - r.left;
-    resizeOrigSize.cy = r.bottom - r.top;
+    if (wantResize && resizeX != resizeY)
+    {
+        POINT cur;
+        GetCursorPos(&cur);
+        RECT full;
+        GetWindowRect(hwnd, &full);
+        RECT edge = resizeX ? GetResizeEdgeZoneRight(full) : GetResizeEdgeZoneBottom(full);
+        int onEdge = PtInRect(&edge, cur) != 0;
+        wantResize = onEdge;
+        suppressMove = onEdge;
+    }
 
-    /* これをインクリメントすると、以前のジェスチャー中に確立されたすべての
-       origSize（ウィンドウの子、ゴール、ボタン、プレイヤーすべて）が一括で
-       無効化される。以下のHierarchy_RecordOriginalSizesは、今この時点で
-       既にアタッチされているものについて即座に再確立する --
-       ResizableWindowStrategyのoriginalSizes辞書がStartResizing()の
-       たびに空から始まり、RecordOriginalSizesRecursiveによって埋められる
-       挙動を踏襲している。このジェスチャーの途中で子になったもの
-       （プレイヤーが歩いて入ってくる、ゴール/ボタンがドラッグで
-       乗せられる）は、代わりにHierarchy_ApplyRelativeTransformが初めて
-       触れられた際に currentSize/scale を遅延的に逆算するフォールバックに
-       任される。
-       これはオリジナルの "if (!originalSizes.ContainsKey(child))"
-       フォールバックと同じで、ドラッグ開始後にウィンドウが既にどれだけ
-       拡大縮小していたかに関わらず、いきなりcurrentSize倍にジャンプ
-       することを防ぐ。 */
-    g_resizeGeneration++;
-    Hierarchy_RecordOriginalSizes(index);
-}
+    if (!suppressMove && (HasCapability(capabilities, WC_MOVE_X) || HasCapability(capabilities, WC_MOVE_Y)))
+    {
+        dragging = 1;
+        SetCapture(hwnd);
+        /* window.PointToClient(Cursor.Position)相当: 画面絶対座標そのままでは
+           なく、その時点のウィンドウ左上を基準にした相対座標で記録する
+           （UpdateDrag参照 -- この基準の動的な取り直しが、ドラッグ開始位置
+           からの累積差分を絶対目標位置へ正しく収束させるために必須）。 */
+        POINT curAbs;
+        GetCursorPos(&curAbs);
+        RECT outer0;
+        GetWindowRect(hwnd, &outer0);
+        lastMouse.x = curAbs.x - outer0.left;
+        lastMouse.y = curAbs.y - outer0.top;
+        blockedL = blockedR = blockedU = blockedD = 0;
+    }
 
-void MinimizableWindow::OnMouseDown(int index)
-{
-    SetWindowMinimized(index, !minimized);
-}
+    if (wantResize)
+    {
+        resizing = 1;
+        SetCapture(hwnd);
+        GetCursorPos(&resizeDragStart);
 
-void UnconstrainedWindow::OnMouseDown(int index)
-{
-    resizing = 1;
-    SetCapture(hwnd);
-    GetCursorPos(&resizeDragStart);
+        /* resizeOrigSize/unconstrainedAnchorは常にlogicalW/H(符号付き)+
+           アンカー点として統一的に扱う -- 反転を許可しない軸でもこの表現に
+           乗せることで、UpdateResize側を軸ごとに分岐させずに済む。反転を
+           許可しない軸のlogicalは常に非負にクランプされる(UpdateResize
+           参照)ため、意味的には従来のResizableWindow(符号なしouterサイズ)と
+           完全に等価になる。 */
+        RECT r;
+        GetWindowRect(hwnd, &r);
+        resizeOrigSize.cx = logicalW;
+        resizeOrigSize.cy = logicalH;
+        unconstrainedAnchor.x = (logicalW < 0) ? r.right : r.left;
+        unconstrainedAnchor.y = (logicalH < 0) ? r.bottom : r.top;
 
-    /* このジェスチャーの基準となる符号付き論理サイズをresizeOrigSizeに
-       退避する（cx/cyはLONGなので負値もそのまま格納できる）。 */
-    resizeOrigSize.cx = logicalW;
-    resizeOrigSize.cy = logicalH;
-
-    /* アンカー点（このジェスチャー中ずっと固定される角）を、現在の反転
-       状態から逆算する: 反転していない軸は実ウィンドウの左上そのもの、
-       反転している軸は実ウィンドウの右(下)端がアンカーになる
-       （UpdateUnconstrainedのVisualTopLeft計算と対になる）。 */
-    RECT r;
-    GetWindowRect(hwnd, &r);
-    unconstrainedAnchor.x = (logicalW < 0) ? r.right : r.left;
-    unconstrainedAnchor.y = (logicalH < 0) ? r.bottom : r.top;
-
-    g_resizeGeneration++;
-    Hierarchy_RecordOriginalSizes(index);
+        /* これをインクリメントすると、以前のジェスチャー中に確立されたすべての
+           origSize（ウィンドウの子、ゴール、ボタン、プレイヤーすべて）が一括で
+           無効化される。以下のHierarchy_RecordOriginalSizesは、今この時点で
+           既にアタッチされているものについて即座に再確立する --
+           ResizableWindowStrategyのoriginalSizes辞書がStartResizing()の
+           たびに空から始まり、RecordOriginalSizesRecursiveによって埋められる
+           挙動を踏襲している。このジェスチャーの途中で子になったもの
+           （プレイヤーが歩いて入ってくる、ゴール/ボタンがドラッグで
+           乗せられる）は、代わりにHierarchy_ApplyRelativeTransformが初めて
+           触れられた際に currentSize/scale を遅延的に逆算するフォールバックに
+           任される。
+           これはオリジナルの "if (!originalSizes.ContainsKey(child))"
+           フォールバックと同じで、ドラッグ開始後にウィンドウが既にどれだけ
+           拡大縮小していたかに関わらず、いきなりcurrentSize倍にジャンプ
+           することを防ぐ。 */
+        g_resizeGeneration++;
+        Hierarchy_RecordOriginalSizes(index);
+    }
 }
 
 void Strategy_HandleMouseUp(int index)
@@ -153,21 +167,28 @@ void ResetButton::OnClick()
 }
 #endif
 
-static void UpdateMovable(int index, GameWindowData *data)
+/* 以前のUpdateMovableと同じロジックに、軸ごとのcapabilities判定を追加した
+   だけ -- WC_MOVE_Xが無ければdxを、WC_MOVE_Yが無ければdyを、衝突判定/
+   適用パイプラインに渡す前に0にする。これにより「移動できるが片方の軸
+   だけ」というウィンドウも既存のCollision_ValidatePosition以下のロジックを
+   一切変えずに実現できる。 */
+void GameWindowData::UpdateDrag(int index)
 {
+    int wantX = HasCapability(capabilities, WC_MOVE_X);
+    int wantY = HasCapability(capabilities, WC_MOVE_Y);
+
     POINT curAbs;
     GetCursorPos(&curAbs);
 
     RECT current;
-    GetWindowFullBounds(data->hwnd, &current);
+    GetWindowFullBounds(hwnd, &current);
 
     /* MovableWindowStrategy.CalculateMovementと一致させる: window.PointToClient(
        Cursor.Position)は画面絶対座標を「その時点のウィンドウ現在位置」基準の
-       相対座標に変換する。data->lastMouseはStrategy_HandleMouseDownでドラッグ
-       開始時に一度だけ記録され、以後このドラッグ中は更新しないが、curは毎フレーム
-       ウィンドウの現在位置を基準に取り直す（PointToClientと同じ）ため、
-       「ドラッグ開始位置 + カーソル累積移動量」という絶対目標位置に代数的に
-       収束する:
+       相対座標に変換する。lastMouseはOnMouseDownでドラッグ開始時に一度だけ
+       記録され、以後このドラッグ中は更新しないが、curは毎フレームウィンドウの
+       現在位置を基準に取り直す（PointToClientと同じ）ため、「ドラッグ開始
+       位置 + カーソル累積移動量」という絶対目標位置に代数的に収束する:
          P(t) = P(t-1) + [ (cur(t)-outer(t-1)) - lastMouse ]
               = P(t-1) + (C(t)-C(0)) - (P(t-1)-P(0))
               = P(0) + (C(t)-C(0))
@@ -177,16 +198,16 @@ static void UpdateMovable(int index, GameWindowData *data)
        次のフレームは常にこの絶対目標へ向けて再計算されるため、カーソルと
        ウィンドウの相対位置がドラッグ中にズレていくことがない。 */
     RECT outerNow;
-    GetWindowRect(data->hwnd, &outerNow);
+    GetWindowRect(hwnd, &outerNow);
     POINT cur = {curAbs.x - outerNow.left, curAbs.y - outerNow.top};
 
-    int dx = cur.x - data->lastMouse.x;
-    int dy = cur.y - data->lastMouse.y;
+    int dx = wantX ? (cur.x - lastMouse.x) : 0;
+    int dy = wantY ? (cur.y - lastMouse.y) : 0;
 
     CollisionOptions opts;
     opts.excludeIndex = index;
     opts.excludeChildren = 1;
-    opts.checkNormalWindows = data->isNoEntry;
+    opts.checkNormalWindows = HasCapability(capabilities, WC_NOENTRY);
 
     /* UpdateBlockFlags相当: 現在位置から1px先読みした矩形が障害物と重なって
        いるかを毎フレーム静的に判定する（スイープ判定ではない）。既に押し
@@ -199,13 +220,13 @@ static void UpdateMovable(int index, GameWindowData *data)
     OffsetRect(&l1, -1, 0);
     OffsetRect(&d1, 0, 1);
     OffsetRect(&u1, 0, -1);
-    data->blockedR = Collision_CheckOverlap(r1, opts);
-    data->blockedL = Collision_CheckOverlap(l1, opts);
-    data->blockedD = Collision_CheckOverlap(d1, opts);
-    data->blockedU = Collision_CheckOverlap(u1, opts);
+    blockedR = Collision_CheckOverlap(r1, opts);
+    blockedL = Collision_CheckOverlap(l1, opts);
+    blockedD = Collision_CheckOverlap(d1, opts);
+    blockedU = Collision_CheckOverlap(u1, opts);
 
-    int moveX = ((dx > 0 && data->blockedR) || (dx < 0 && data->blockedL)) ? 0 : dx;
-    int moveY = ((dy > 0 && data->blockedD) || (dy < 0 && data->blockedU)) ? 0 : dy;
+    int moveX = ((dx > 0 && blockedR) || (dx < 0 && blockedL)) ? 0 : dx;
+    int moveY = ((dy > 0 && blockedD) || (dy < 0 && blockedU)) ? 0 : dy;
 
     RECT proposed = current;
     OffsetRect(&proposed, moveX, moveY);
@@ -225,8 +246,8 @@ static void UpdateMovable(int index, GameWindowData *data)
     if (actualDx != 0 || actualDy != 0)
     {
         RECT outer;
-        GetWindowRect(data->hwnd, &outer);
-        SetWindowPos(data->hwnd, NULL, outer.left + actualDx, outer.top + actualDy, 0, 0,
+        GetWindowRect(hwnd, &outer);
+        SetWindowPos(hwnd, NULL, outer.left + actualDx, outer.top + actualDy, 0, 0,
                      SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
         Hierarchy_PropagateMove(index, actualDx, actualDy);
         Player_FollowParentMove(Player_GetActive(), index, actualDx, actualDy);
@@ -244,152 +265,111 @@ static void UpdateMovable(int index, GameWindowData *data)
             if (IsButtonWindowKind(g_windows[b].kind))
                 FollowMovedWindowIfDescendant(&g_windows[b], index, actualDx, actualDy);
 
-        InvalidateRect(data->hwnd, NULL, FALSE);
+        InvalidateRect(hwnd, NULL, FALSE);
     }
 
-    /* data->lastMouseはここで更新しない -- StartDragging相当のStrategy_HandleMouseDown
-       でのみ記録され、ドラッグ終了までドラッグ開始時の値を保持し続ける。 */
+    /* lastMouseはここで更新しない -- StartDragging相当のOnMouseDownでのみ
+       記録され、ドラッグ終了までドラッグ開始時の値を保持し続ける。 */
     Hierarchy_CheckAndUpdate(index);
 }
 
-static void UpdateResizable(int index, GameWindowData *data)
+/* 以前のUpdateResizable(通常のリサイズ)とUpdateUnconstrained(反転可能な
+   制限なしリサイズ)を1本に統合したもの。WC_RESIZE_FLIP_X/Yを軸ごとの
+   修飾フラグとして扱い、Collision_ValidateSizeFromAnchorへ渡すflipX/flipYを
+   その軸が反転を許可していない場合は常にfalseにする。flipX=flipY=false・
+   anchor=ドラッグ開始時の左上のとき、Collision_ValidateSizeFromAnchorは
+   Collision_ValidateSize(旧UpdateResizableが使っていた関数)と数式的に
+   完全に同じ結果を返すため、これは「純粋なResizable」の挙動を変えない
+   （両関数の実装を突き合わせて確認済み）。両軸とも反転を許可しない場合は
+   子の下限を旧UpdateResizableと同じCHILD_UNBOUNDED_MIN_SIZEに、どちらかの
+   軸でも反転を許可する場合は旧UpdateUnconstrainedと同じUNCONSTRAINED_MIN_ABS_SIZEに
+   する（軸ごとに異なる下限を混在させるとCollision_ValidateSizeFromAnchorの
+   単一のminSize引数と噛み合わないため、「どちらかの軸でも反転可なら
+   反転可グループの制限値を両軸に適用する」という単純化を採用した -- 既存の
+   純粋なResizable/純粋なUnconstrainedの2パターンは完全に元の挙動のまま、
+   新しく増えた「移動+リサイズ」等の組み合わせのみがこの単純化の対象になる）。 */
+void GameWindowData::UpdateResize(int index)
 {
+    int wantX = HasCapability(capabilities, WC_RESIZE_X);
+    int wantY = HasCapability(capabilities, WC_RESIZE_Y);
+    int flipX = HasCapability(capabilities, WC_RESIZE_FLIP_X);
+    int flipY = HasCapability(capabilities, WC_RESIZE_FLIP_Y);
+
     POINT cur;
     GetCursorPos(&cur);
 
-    int dx = cur.x - data->resizeDragStart.x;
-    int dy = cur.y - data->resizeDragStart.y;
+    int dx = wantX ? (cur.x - resizeDragStart.x) : 0;
+    int dy = wantY ? (cur.y - resizeDragStart.y) : 0;
 
-    RECT current;
-    GetWindowFullBounds(data->hwnd, &current);
+    int newLogicalW = resizeOrigSize.cx + dx;
+    int newLogicalH = resizeOrigSize.cy + dy;
 
-    SIZE proposed;
-    proposed.cx = data->resizeOrigSize.cx + dx;
-    proposed.cy = data->resizeOrigSize.cy + dy;
-    if (proposed.cx < MIN_WINDOW_SIZE)
-        proposed.cx = MIN_WINDOW_SIZE;
-    if (proposed.cy < MIN_WINDOW_SIZE)
-        proposed.cy = MIN_WINDOW_SIZE;
-
-    CollisionOptions opts;
-    opts.excludeIndex = index;
-    opts.excludeChildren = 1;
-    opts.checkNormalWindows = data->isNoEntry;
-
-    SIZE validated = Collision_ValidateSize(current, proposed, opts);
-
-    /* `current`（したがってその幅/高さ）はCollisionBoundsと等価 -- 4辺のうち
-       3辺はクライアントベース -- であり、これは上の衝突比較には正しいが、
-       ウィンドウの実際の外枠サイズが変化したかどうかを検出するには適さない:
-       `validated`/`resizeOrigSize`は外枠ベース（ドラッグ開始時にGetWindowRect
-       から構築）であるため、これらをクライアントベースのoldW/oldHと比較すると、
-       実際のマウス移動の有無に関わらず毎フレーム「変化した」と判定されてしまい、
-       スケール伝播が繰り返しトリガーされてしまう。 */
-    RECT outer;
-    GetWindowRect(data->hwnd, &outer);
-    int oldW = outer.right - outer.left;
-    int oldH = outer.bottom - outer.top;
-
-    if (validated.cx != oldW || validated.cy != oldH)
+    /* 反転を許可する軸は0付近の不感帯: 絶対値がUNCONSTRAINED_MIN_ABS_SIZE
+       未満にならないよう符号を保ったままクランプする（ユーザーがドラッグし
+       続ければ自然に符号が反転する）。反転を許可しない軸は0を跨がせず、
+       通常のMIN_WINDOW_SIZEを下限にする（従来のUpdateResizableと同じ）。 */
+    if (flipX)
     {
-        SetWindowPos(data->hwnd, NULL, 0, 0, validated.cx, validated.cy,
-                     SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-
-        /* 子/孫は絶対位置を固定したまま拡大縮小するHierarchy_ApplyScaleでは
-           なく、制限なしリサイズと同じHierarchy_ApplyRelativeTransformを使う
-           -- 親に対する相対位置・相対サイズを保ったまま追従させる。基準は
-           常にドラッグ開始時点のrootOrigRect（このウィンドウ自身の左上は
-           SWP_NOMOVEで固定されたままなので、outer.left/topは開始時から
-           不変）で、直前のフレームは基準にしない -- ResizableWindowStrategyが
-           ジェスチャー全体を通して単一のキャッシュされた`originalSize`を
-           使う挙動と一致させている。 */
-        RECT rootOrigRect = {outer.left, outer.top, outer.left + data->resizeOrigSize.cx,
-                              outer.top + data->resizeOrigSize.cy};
-        RECT rootNewRect = {outer.left, outer.top, outer.left + validated.cx, outer.top + validated.cy};
-        /* 子自身にはMIN_WINDOW_SIZEの下限を課さない -- 親（このウィンドウ
-           自身）は上のproposed.cx/cyクランプで既にMIN_WINDOW_SIZE未満に
-           なれないため、子は親が縮む分だけ比例して自由に縮められる形で
-           間接的に親のサイズ制限を受ける（実際に要望された挙動）。 */
-        Hierarchy_ApplyRelativeTransform(index, rootOrigRect, rootNewRect, CHILD_UNBOUNDED_MIN_SIZE, MAX_WINDOW_SIZE);
-
-        InvalidateRect(data->hwnd, NULL, FALSE);
-        /* 拡大直後、実際にWM_PAINTで塗りつぶされるまで新しい領域が黒く
-           フラッシュするのを防ぐため同期的に再描画する（ゴール/子ウィンドウ/
-           プレイヤーと同じ対策）。 */
-        UpdateWindow(data->hwnd);
+        if (newLogicalW >= 0 && newLogicalW < UNCONSTRAINED_MIN_ABS_SIZE)
+            newLogicalW = UNCONSTRAINED_MIN_ABS_SIZE;
+        else if (newLogicalW < 0 && newLogicalW > -UNCONSTRAINED_MIN_ABS_SIZE)
+            newLogicalW = -UNCONSTRAINED_MIN_ABS_SIZE;
     }
-}
+    else if (newLogicalW < MIN_WINDOW_SIZE)
+    {
+        newLogicalW = MIN_WINDOW_SIZE;
+    }
+    if (flipY)
+    {
+        if (newLogicalH >= 0 && newLogicalH < UNCONSTRAINED_MIN_ABS_SIZE)
+            newLogicalH = UNCONSTRAINED_MIN_ABS_SIZE;
+        else if (newLogicalH < 0 && newLogicalH > -UNCONSTRAINED_MIN_ABS_SIZE)
+            newLogicalH = -UNCONSTRAINED_MIN_ABS_SIZE;
+    }
+    else if (newLogicalH < MIN_WINDOW_SIZE)
+    {
+        newLogicalH = MIN_WINDOW_SIZE;
+    }
 
-/* WT_UNCONSTRAINED/WT_UNCONSTRAINED_NOENTRY専用のリサイズ更新。UpdateResizable
-   と違い上限/下限をMIN_WINDOW_SIZE/MAX_WINDOW_SIZEではなく
-   UNCONSTRAINED_MIN_ABS_SIZE/MAX_WINDOW_SIZEにし、論理サイズが0を跨ぐと
-   反転（見た目のミラーのみ、実HWNDは常に正サイズ）する。
-
-   衝突判定は「アンカー点を固定した正方向（右/下）への伸長」としてのみ
-   評価する（logicalCurrent参照）。これは反転中の軸について、アンカーの
-   反対側に既にある障害物を検出できないという既知の制約だが、反転は
-   見た目のみの効果でありプレイヤーの接地判定には影響しないため許容する。 */
-static void UpdateUnconstrained(int index, GameWindowData *data)
-{
-    POINT cur;
-    GetCursorPos(&cur);
-
-    int dx = cur.x - data->resizeDragStart.x;
-    int dy = cur.y - data->resizeDragStart.y;
-
-    int newLogicalW = data->resizeOrigSize.cx + dx;
-    int newLogicalH = data->resizeOrigSize.cy + dy;
-
-    /* 0付近の不感帯: 絶対値がUNCONSTRAINED_MIN_ABS_SIZE未満にならないように
-       符号を保ったままクランプする。これにより実ウィンドウが完全に潰れず、
-       ユーザーがドラッグし続ければ自然に符号が反転する。 */
-    if (newLogicalW >= 0 && newLogicalW < UNCONSTRAINED_MIN_ABS_SIZE)
-        newLogicalW = UNCONSTRAINED_MIN_ABS_SIZE;
-    else if (newLogicalW < 0 && newLogicalW > -UNCONSTRAINED_MIN_ABS_SIZE)
-        newLogicalW = -UNCONSTRAINED_MIN_ABS_SIZE;
-    if (newLogicalH >= 0 && newLogicalH < UNCONSTRAINED_MIN_ABS_SIZE)
-        newLogicalH = UNCONSTRAINED_MIN_ABS_SIZE;
-    else if (newLogicalH < 0 && newLogicalH > -UNCONSTRAINED_MIN_ABS_SIZE)
-        newLogicalH = -UNCONSTRAINED_MIN_ABS_SIZE;
-
-    int flipX = newLogicalW < 0;
-    int flipY = newLogicalH < 0;
+    /* isFlippedX/Yは「今回のフレームで実際に反転しているか」であり、
+       flipX/Y(その軸が反転を許可されているか)とは別物 -- 反転を許可しない
+       軸は上のクランプで0を跨がないため、isFlippedX/Yは常にfalseになる。 */
+    int isFlippedX = newLogicalW < 0;
+    int isFlippedY = newLogicalH < 0;
     int absW = abs(newLogicalW);
     int absH = abs(newLogicalH);
 
-    int prevAbsW = abs(data->logicalW);
-    int prevAbsH = abs(data->logicalH);
+    int prevAbsW = abs(logicalW);
+    int prevAbsH = abs(logicalH);
     /* 反転イベント(前フレームまでの符号と今回の符号が食い違う)の検出用。
        子孫のinheritedFlipX/Yは「今その内部にいるか」のライブ判定ではなく、
        実際に反転が起きた瞬間だけXORで積算する永続フラグのため、コミット前の
        符号をここで保持しておく必要がある。 */
-    int wasFlippedX = data->logicalW < 0;
-    int wasFlippedY = data->logicalH < 0;
+    int wasFlippedX = logicalW < 0;
+    int wasFlippedY = logicalH < 0;
 
     CollisionOptions opts;
     opts.excludeIndex = index;
     opts.excludeChildren = 1;
-    /* 制限なしリサイズは通常ウィンドウ用のNoEntry判定(isNoEntryの場合のみ)
-       とは無関係に、不可侵ゾーン/不可侵ウィンドウ境界には常にぶつかる
-       -- GatherObstaclesはNoEntry系をcheckNormalWindowsの値に関わらず
-       常に収集するため、この設定のままでよい。 */
-    opts.checkNormalWindows = data->isNoEntry;
+    /* 反転を許可する軸を持つウィンドウは、通常ウィンドウ用のNoEntry判定
+       (WC_NOENTRYの場合のみ)とは無関係に、不可侵ゾーン/不可侵ウィンドウ
+       境界には常にぶつかる(元のUpdateUnconstrainedと同じ) -- GatherObstacles
+       はNoEntry系をcheckNormalWindowsの値に関わらず常に収集するため、
+       この設定のままでよい。 */
+    opts.checkNormalWindows = HasCapability(capabilities, WC_NOENTRY);
 
     SIZE currentAbs = {prevAbsW, prevAbsH};
     SIZE proposed = {absW, absH};
-    /* Collision_ValidateSizeExではなくこちらを使う: flip中の軸はアンカーを
-       右/下端として固定し左/上方向へ伸びるため、実際に伸びている側の
-       障害物（不可侵ゾーン等）を正しく検出できる（アンカーから常に正方向
-       へ伸びる前提のExでは反転側の障害物を見逃す既知の制約があった）。 */
-    SIZE validated = Collision_ValidateSizeFromAnchor(data->unconstrainedAnchor, flipX, flipY,
+    int minAbsSize = (flipX || flipY) ? UNCONSTRAINED_MIN_ABS_SIZE : MIN_WINDOW_SIZE;
+    SIZE validated = Collision_ValidateSizeFromAnchor(unconstrainedAnchor, isFlippedX, isFlippedY,
                                                        currentAbs, proposed, opts,
-                                                       UNCONSTRAINED_MIN_ABS_SIZE, MAX_WINDOW_SIZE);
+                                                       minAbsSize, MAX_WINDOW_SIZE);
 
-    int visualLeft = flipX ? (data->unconstrainedAnchor.x - validated.cx) : data->unconstrainedAnchor.x;
-    int visualTop = flipY ? (data->unconstrainedAnchor.y - validated.cy) : data->unconstrainedAnchor.y;
+    int visualLeft = isFlippedX ? (unconstrainedAnchor.x - validated.cx) : unconstrainedAnchor.x;
+    int visualTop = isFlippedY ? (unconstrainedAnchor.y - validated.cy) : unconstrainedAnchor.y;
 
     RECT outer;
-    GetWindowRect(data->hwnd, &outer);
+    GetWindowRect(hwnd, &outer);
     if (outer.left != visualLeft || outer.top != visualTop ||
         (outer.right - outer.left) != validated.cx || (outer.bottom - outer.top) != validated.cy)
     {
@@ -400,29 +380,31 @@ static void UpdateUnconstrained(int index, GameWindowData *data)
            してしまうことがあり、これが1フレームごとに新しい正しい描画で
            上書きされる形になって、見た目上がくがくして見える（実際に報告
            された不具合: 反転中に伸ばすとタイトルバーが滑らかに動かない）。
-           単純な移動のみ(UpdateMovable)や単純なリサイズのみ(UpdateResizable、
-           SWP_NOMOVE)ではこの同時発生が起きないため気付かれなかった。
-           SWP_NOREDRAWでOS側の自動再描画を止め、このすぐ下の同期的な
-           InvalidateRect+UpdateWindowだけが実際の描画を行うようにする。 */
-        SetWindowPos(data->hwnd, NULL, visualLeft, visualTop, validated.cx, validated.cy,
+           反転を許可しない軸だけの単純なリサイズ(SWP_NOMOVE相当)ではこの
+           同時発生が起きないが、統合後は同じ経路を通るため常にSWP_NOREDRAW
+           にしておく。 */
+        SetWindowPos(hwnd, NULL, visualLeft, visualTop, validated.cx, validated.cy,
                      SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
 
         /* 子の追従はHierarchy_ApplyScaleではなくHierarchy_ApplyRelativeTransform
-           を使う: 通常のResizableと違い、アンカー基準の反転で親の可視矩形の
-           左上そのものが動く/反転しうるため、子の絶対位置を固定したまま
-           サイズだけ変えると相対配置が崩れる（実際に発生した不具合）。
-           子は親に対する相対位置・相対サイズを保ったまま追従させる。
-           スケール基準は（通常のResizableと同じく）ドラッグ開始時点の
+           を使う: アンカー基準の反転で親の可視矩形の左上そのものが動く/
+           反転しうるため、子の絶対位置を固定したままサイズだけ変えると
+           相対配置が崩れる（実際に発生した不具合）。子は親に対する相対位置・
+           相対サイズを保ったまま追従させる。スケール基準はドラッグ開始時点の
            サイズ・位置＝ジェスチャー全体を通して固定のrootOrigRect。 */
-        int origAbsW = abs(data->resizeOrigSize.cx);
-        int origAbsH = abs(data->resizeOrigSize.cy);
-        int origFlipX = data->resizeOrigSize.cx < 0;
-        int origFlipY = data->resizeOrigSize.cy < 0;
-        int origVisualLeft = origFlipX ? (data->unconstrainedAnchor.x - origAbsW) : data->unconstrainedAnchor.x;
-        int origVisualTop = origFlipY ? (data->unconstrainedAnchor.y - origAbsH) : data->unconstrainedAnchor.y;
+        int origAbsW = abs(resizeOrigSize.cx);
+        int origAbsH = abs(resizeOrigSize.cy);
+        int origFlipX = resizeOrigSize.cx < 0;
+        int origFlipY = resizeOrigSize.cy < 0;
+        int origVisualLeft = origFlipX ? (unconstrainedAnchor.x - origAbsW) : unconstrainedAnchor.x;
+        int origVisualTop = origFlipY ? (unconstrainedAnchor.y - origAbsH) : unconstrainedAnchor.y;
         RECT rootOrigRect = {origVisualLeft, origVisualTop, origVisualLeft + origAbsW, origVisualTop + origAbsH};
         RECT rootNewRect = {visualLeft, visualTop, visualLeft + validated.cx, visualTop + validated.cy};
-        Hierarchy_ApplyRelativeTransform(index, rootOrigRect, rootNewRect, UNCONSTRAINED_MIN_ABS_SIZE, MAX_WINDOW_SIZE);
+        /* 反転を全く許可しない場合は子の下限も従来のCHILD_UNBOUNDED_MIN_SIZEを
+           使う(通常のResizableと同じ、親自身のクランプで間接的にサイズ制限を
+           受ける)。 */
+        int childMinSize = (flipX || flipY) ? UNCONSTRAINED_MIN_ABS_SIZE : CHILD_UNBOUNDED_MIN_SIZE;
+        Hierarchy_ApplyRelativeTransform(index, rootOrigRect, rootNewRect, childMinSize, MAX_WINDOW_SIZE);
 
         /* 反転イベントが起きた軸だけ、その時点の全子孫のinheritedFlipX/Yを
            永続的にXORで反転させる。親から切り離された後もこの見た目は
@@ -432,29 +414,24 @@ static void UpdateUnconstrained(int index, GameWindowData *data)
            だけで追従させるため反転を正しく表現できず、そのままだと反転で
            見た目上反対側に移動したタイトルバー等にプレイヤーがめり込んで
            しまう（実際に報告された不具合）。 */
-        if (flipX != wasFlippedX || flipY != wasFlippedY)
+        if (isFlippedX != wasFlippedX || isFlippedY != wasFlippedY)
         {
-            int mirrorX = flipX != wasFlippedX;
-            int mirrorY = flipY != wasFlippedY;
+            int mirrorX = isFlippedX != wasFlippedX;
+            int mirrorY = isFlippedY != wasFlippedY;
             Hierarchy_ToggleInheritedFlip(index, mirrorX, mirrorY);
             Hierarchy_MirrorDirectChildren(index, rootNewRect, mirrorX, mirrorY);
         }
 
-        data->logicalW = flipX ? -validated.cx : validated.cx;
-        data->logicalH = flipY ? -validated.cy : validated.cy;
+        logicalW = isFlippedX ? -validated.cx : validated.cx;
+        logicalH = isFlippedY ? -validated.cy : validated.cy;
 
-        InvalidateRect(data->hwnd, NULL, FALSE);
-        UpdateWindow(data->hwnd);
+        InvalidateRect(hwnd, NULL, FALSE);
+        /* 拡大直後、実際にWM_PAINTで塗りつぶされるまで新しい領域が黒く
+           フラッシュするのを防ぐため同期的に再描画する（ゴール/子ウィンドウ/
+           プレイヤーと同じ対策）。 */
+        UpdateWindow(hwnd);
     }
 }
-
-/* UpdateMovable/UpdateResizable/UpdateUnconstrainedへの委譲。以前は
-   Strategy_UpdateAll内でkindを見てUpdateUnconstrained/UpdateResizableを
-   切り替えていたが、その分岐はUpdateResizeの仮想ディスパッチ(どちらの
-   クラスがインスタンス化されているか)へ置き換えた。 */
-void MovableWindow::UpdateDrag(int index) { UpdateMovable(index, this); }
-void ResizableWindow::UpdateResize(int index) { UpdateResizable(index, this); }
-void UnconstrainedWindow::UpdateResize(int index) { UpdateUnconstrained(index, this); }
 
 void Strategy_UpdateAll(float dt)
 {

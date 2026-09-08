@@ -43,7 +43,7 @@
    から算出した色を使い、親を持たないウィンドウよりはっきり太く描くことで、
    どのウィンドウがどれの子なのか一目で分かるようにする。 */
 #define PARENT_OUTLINE_WIDTH 5
-/* 制限なしリサイズ+反転ウィンドウ(WT_UNCONSTRAINED*)専用の絶対サイズ下限。
+/* WC_RESIZE_FLIP_X/Yを持つ軸(反転可能なリサイズ)専用の絶対サイズ下限。
    実HWNDは常に正サイズを維持する必要があるため、論理サイズが0を跨いでも
    実際のウィンドウが完全に潰れないよう、MIN_WINDOW_SIZEより小さいこの値を
    絶対値の下限として使う。 */
@@ -57,21 +57,17 @@
    ラップしないよう、INT_MAXの代わりに十分大きくかつ安全な値を使う。 */
 #define MAX_WINDOW_SIZE 1000000
 
+/* コンポーネント化(WindowCapabilities参照)により、以前あったWT_MOVABLE/
+   WT_RESIZABLE/WT_MOVABLE_NOENTRY/WT_RESIZABLE_NOENTRY/WT_MINIMIZABLE/
+   WT_MINIMIZABLE_NOENTRY/WT_UNCONSTRAINED/WT_UNCONSTRAINED_NOENTRY/
+   WT_DELETABLE/WT_NORMAL_BLACK_NOENTRY/WT_NORMAL_WHITE_NOENTRYの11種は
+   撤去した。kindは「見た目の土台」（黒/白/テキスト表示/ゴール/ボタン）
+   だけを表し、振る舞いの組み合わせはCreateGameWindow(Indexed)の
+   WindowCapabilities引数で指定する。 */
 typedef enum {
     WT_NORMAL_BLACK,
     WT_NORMAL_WHITE,
     WT_TEXT_DISPLAY,
-    WT_MOVABLE,
-    WT_RESIZABLE,
-    WT_DELETABLE,
-    WT_MINIMIZABLE,
-    WT_NORMAL_BLACK_NOENTRY,
-    WT_NORMAL_WHITE_NOENTRY,
-    WT_RESIZABLE_NOENTRY,
-    WT_MOVABLE_NOENTRY,
-    WT_MINIMIZABLE_NOENTRY,
-    WT_UNCONSTRAINED,        /* 制限なしリサイズ+反転ウィンドウ */
-    WT_UNCONSTRAINED_NOENTRY,
     WT_GOAL,
     WT_BTN_START,
     WT_BTN_RETRY,
@@ -90,6 +86,44 @@ typedef enum {
 #endif
 } WindowKind;
 
+/* ウィンドウの振る舞いをパーツ単位で自由に組み合わせるためのビットフラグ。
+   以前は「移動できる」「リサイズできる」「不可侵」等が全てWindowKindの
+   別々のenum値(および対応する派生クラス)として存在し、組み合わせの数だけ
+   enum値が必要だった（移動もリサイズもできるウィンドウは作れなかった）。
+   移動・リサイズは全方位ではなく縦横independentのフラグにし、両方
+   立てることで従来の全方位の挙動になる。WC_RESIZE_FLIP_X/Yは対応する
+   WC_RESIZE_X/Yが立っていて初めて意味を持つ修飾フラグ（以前のWT_UNCONSTRAINED
+   相当: サイズが0を跨いで反転できる）。WC_NOENTRYは以前のisNoEntryフィールドを
+   統合したもの。 */
+enum WindowCapabilities : unsigned int
+{
+    WC_NONE = 0,
+    WC_MOVE_X = 1u << 0,
+    WC_MOVE_Y = 1u << 1,
+    WC_RESIZE_X = 1u << 2,
+    WC_RESIZE_Y = 1u << 3,
+    WC_RESIZE_FLIP_X = 1u << 4, /* WC_RESIZE_Xの修飾子: 論理サイズが負(反転)を跨げる */
+    WC_RESIZE_FLIP_Y = 1u << 5, /* WC_RESIZE_Yの修飾子: 同上 */
+    WC_MINIMIZE = 1u << 6,
+    WC_DELETE = 1u << 7,
+    WC_NOENTRY = 1u << 8,
+};
+
+inline WindowCapabilities operator|(WindowCapabilities a, WindowCapabilities b)
+{
+    return static_cast<WindowCapabilities>(static_cast<unsigned int>(a) | static_cast<unsigned int>(b));
+}
+inline WindowCapabilities operator&(WindowCapabilities a, WindowCapabilities b)
+{
+    return static_cast<WindowCapabilities>(static_cast<unsigned int>(a) & static_cast<unsigned int>(b));
+}
+inline WindowCapabilities &operator|=(WindowCapabilities &a, WindowCapabilities b) { return a = a | b; }
+
+inline bool HasCapability(WindowCapabilities caps, WindowCapabilities flag)
+{
+    return (static_cast<unsigned int>(caps) & static_cast<unsigned int>(flag)) != 0;
+}
+
 struct GameWindowData
 {
     HWND hwnd;
@@ -99,7 +133,7 @@ struct GameWindowData
     char text[64];
 
     int solid;   /* プレイヤーが上に乗れるか */
-    int isNoEntry;
+    WindowCapabilities capabilities; /* 旧isNoEntryフィールドはWC_NOENTRYへ統合した */
     int minimized;
     int hidden;  /* 完全に非表示（最小化ウィンドウ用） */
 
@@ -111,21 +145,23 @@ struct GameWindowData
     int origSizeGen;    /* origSizeが最後に確立された時点のg_resizeGeneration値 -- Hierarchy_ApplyRelativeTransform参照 */
     RECT origBoundsAtResizeStart;
 
-    /* Movable（移動可能）ドラッグ状態。lastMouseはMovableWindowStrategy.lastMousePos
-       と同じく、ドラッグ開始時（Strategy_HandleMouseDown）に一度だけ記録され、
+    /* WC_MOVE_X/Yを持つウィンドウのドラッグ状態。lastMouseはMovableWindowStrategy.
+       lastMousePosと同じく、ドラッグ開始時（OnMouseDown）に一度だけ記録され、
        ドラッグ中は更新しない -- 「前フレームのカーソル位置」ではなく
        「ドラッグ開始時のカーソル位置」を意味する。毎フレームの移動量は
-       常にこの固定点からの累積差分として計算される（CalculateMovement参照）。 */
+       常にこの固定点からの累積差分として計算される（UpdateDrag参照）。 */
     int dragging;
     POINT lastMouse;
     int blockedL, blockedR, blockedU, blockedD;
 
-    /* Resizable（リサイズ可能）ドラッグ状態 */
+    /* WC_RESIZE_X/Yを持つウィンドウのドラッグ状態。resizeOrigSizeは
+       WC_RESIZE_FLIP_X/Yが立っていない軸では実outer矩形の幅/高さ、立っている
+       軸では符号付きの論理サイズを意味する(UpdateResize参照)。 */
     int resizing;
     POINT resizeDragStart;
     SIZE resizeOrigSize;
 
-    /* NoEntry縞模様アニメーションの位相（isNoEntryの場合のみ意味を持つ） */
+    /* NoEntry縞模様アニメーションの位相（WC_NOENTRYを持つ場合のみ意味を持つ） */
     float stripeOffset;
 
     /* ウィンドウ外観カスタマイズ（SetWindowAppearance）。hasCustomAppearance=0の
@@ -137,17 +173,17 @@ struct GameWindowData
     COLORREF outlineColor;
     char titleText[64];
 
-    /* 制限なしリサイズ+反転ウィンドウ(WT_UNCONSTRAINED*)専用。実HWNDのサイズは
-       常にabs(logicalW), abs(logicalH)。符号が負の軸はミラー描画される
-       （PaintGameWindowのStretchBlt参照）。それ以外の種別では常に0以上。 */
+    /* WC_RESIZE_FLIP_X/Yを持つウィンドウ専用。実HWNDのサイズは常にabs(logicalW),
+       abs(logicalH)。符号が負の軸はミラー描画される（PaintGameWindowの
+       StretchBlt参照）。反転を許可していない軸では常に0以上。 */
     int logicalW, logicalH;
     POINT unconstrainedAnchor; /* ドラッグ開始時に固定される左上アンカー点（スクリーン座標） */
 
-    /* 祖先の制限なしリサイズが反転する「たびに」XORで積算される見た目だけの
-       ミラーフラグ。ウィンドウ自身の種別に関わらず持つ（子孫すべてが対象）。
-       親から切り離されても値はそのまま保持され、再度いずれかの祖先が反転
-       イベントを起こすまで変化しない（Hierarchy_ToggleInheritedFlip参照）。
-       描画時はこれと自分自身の反転状態(WT_UNCONSTRAINED*かつlogicalW/H<0)を
+    /* 祖先の反転可能リサイズが反転する「たびに」XORで積算される見た目だけの
+       ミラーフラグ。ウィンドウ自身のcapabilitiesに関わらず持つ（子孫すべてが
+       対象）。親から切り離されても値はそのまま保持され、再度いずれかの祖先が
+       反転イベントを起こすまで変化しない（Hierarchy_ToggleInheritedFlip参照）。
+       描画時はこれと自分自身の反転状態(WC_RESIZE_FLIP_X/Yを持ちlogicalW/H<0)を
        XORした結果を最終的な見た目の反転として使う（PaintGameWindow参照）。 */
     int inheritedFlipX, inheritedFlipY;
 
@@ -168,25 +204,33 @@ struct GameWindowData
     HBITMAP iconicBitmap;
 
 #ifdef ENABLE_STAGE_EDITOR
-    /* WT_BTN_PALETTEの場合のみ意味を持つ: ドラッグでどの種別を配置するか、
-       ドラッグ終了後にどの位置・サイズへ戻るか。paletteIsNoEntryは
-       paletteKindがNoEntry系かどうか（アイコンに縞模様枠を描くかの判定用、
-       GetKindAppearanceの結果をEditor_LoadTestStageで一度だけ計算して
-       キャッシュしておく）。paletteIconSizeはドラッグしていない時の
-       アイコンサイズ、ドラッグ中はEDITOR_DEFAULT_SIZE相当まで拡大される。
-       paletteIsZoneは、このアイコンが実際にはGameWindowではなく静的
-       NoEntryZone（NoEntry_AddZone、矩形+クリックスルーの縞模様マーカー）を
-       配置するための特殊なパレット項目であることを示す -- trueの場合、
-       paletteKindは見た目（背景色/縞模様枠）を借りるためだけに使われ、
-       ドロップ時にCreateGameWindowIndexedではなくNoEntry_AddZoneが
+    /* WT_BTN_PALETTEの場合のみ意味を持つ: ドラッグでどの土台(kind)+
+       どのcapabilities組み合わせを配置するか、ドラッグ終了後にどの位置・
+       サイズへ戻るか。NoEntry込みかどうかは`HasCapability(paletteCaps,
+       WC_NOENTRY)`で直接判定する（以前のpaletteIsNoEntryキャッシュ用
+       フィールドは撤去、capabilitiesが既にビットとして持っているため
+       冗長）。paletteIconSizeはドラッグしていない時のアイコンサイズ、
+       ドラッグ中はEDITOR_DEFAULT_SIZE相当まで拡大される。paletteIsZoneは、
+       このアイコンが実際にはGameWindowではなく静的NoEntryZone
+       （NoEntry_AddZone、矩形+クリックスルーの縞模様マーカー）を配置する
+       ための特殊なパレット項目であることを示す -- trueの場合、
+       paletteKind/paletteCapsは見た目（背景色/縞模様枠）を借りるためだけに
+       使われ、ドロップ時にCreateGameWindowIndexedではなくNoEntry_AddZoneが
        呼ばれる（Editor_EndPaletteDrag参照）。paletteIsPlayerStartは同様の
        特殊項目で、GameWindow/NoEntryZoneのどちらでもなく、既存のg_player
        （シングルトン）をドロップ位置へ移動させ、その位置を新しい初期
-       出現位置として再確立する（Editor_CommitPending参照）。 */
+       出現位置として再確立する（Editor_CommitPending参照）。paletteIsPartは
+       「土台」ではなく「能力パーツ」であることを示す -- trueの場合、単体
+       ドロップでは仮置き状態に入らず、代わりにその時点で重なっている仮置き
+       ウィンドウのpaletteCapsへ自身のpaletteCaps(単一または少数のビット)を
+       OR結合してから、常にホームポジションへ戻る（消費型の操作。Editor_
+       EndPaletteDrag参照）。仮置きが無い、または仮置き中のものが
+       Zone/PlayerStartの場合は何も起きずホームへ戻るだけ。 */
     WindowKind paletteKind;
-    int paletteIsNoEntry;
+    WindowCapabilities paletteCaps;
     int paletteIsZone;
     int paletteIsPlayerStart;
+    int paletteIsPart;
     POINT paletteHomePos;
     SIZE paletteIconSize;
     int paletteDragging;
@@ -214,61 +258,19 @@ struct GameWindowData
     int isEditorChrome;
 #endif
 
-    /* C++移行フェーズ3: 元のC#版IWindowStrategy(BaseWindowStrategyの
-       仮想メソッド)に相当する仮想フック。挙動を変えずに、strategy.cpp/
-       gamewindow.cppにあった「kindでswitchして分岐する」処理を、対応する
-       派生クラス(下記)のオーバーライドへ置き換える。フィールドは種別ごとに
-       派生クラスへ移さず、あえてこの基底クラスに全て残したまま（フラットな
-       レイアウト）にしている -- 自動テストが無い状態でフィールドアクセスの
-       形（&g_windows[i]をGameWindowData*として扱う数百箇所の呼び出し）まで
-       変更すると壊れた際の検出が困難になるため、今回は「振る舞いの
-       仮想化」だけをスコープにした意図的な設計判断。既定の実装は全て
-       no-op(何もしない)で、これはswitch文のdefault:break;と同じ意味。 */
+    /* コンポーネント化により、以前ここにあったMovableWindow/ResizableWindow/
+       UnconstrainedWindow/MinimizableWindow/DeletableWindowという「1振る舞い
+       1派生クラス」の単一継承階層は撤去した -- 単一継承では「移動もリサイズも
+       できるウィンドウ」を表現できないため。今はcapabilities(WindowCapabilities
+       参照)のビットを見て分岐する通常のメンバ関数として実装する(strategy.cpp/
+       gamewindow.cpp)。ボタン(下記)だけは個別のOnClick文言を持つため引き続き
+       仮想関数のままにする。 */
     virtual ~GameWindowData() = default;
-    virtual void OnMouseDown(int index) { (void)index; }
-    virtual void UpdateDrag(int index) { (void)index; }
-    virtual void UpdateResize(int index) { (void)index; }
-    virtual void DrawStrategyMark(HDC hdc, RECT rc, COLORREF color) const { (void)hdc; (void)rc; (void)color; }
+    void OnMouseDown(int index);
+    void UpdateDrag(int index);
+    void UpdateResize(int index);
+    void DrawStrategyMark(HDC hdc, RECT rc, COLORREF color, COLORREF resizeColor) const;
     virtual void OnClick() {}
-};
-
-/* ---- Strategy_HandleMouseDown/Strategy_UpdateAll/DrawKindMarkのswitch文を
-   置き換える派生クラス群。NoEntry版(WT_*_NOENTRY)は挙動が非NoEntry版と
-   完全に同一(isNoEntryは純粋なデータフラグであり、描画・当たり判定側で
-   別途参照される)なので、専用のサブクラスは作らず同じクラスを共有する
-   -- WindowRegistry::Add(kind)のファクトリ内switchで両方のkindを同じ
-   クラスへマッピングする。 ---- */
-
-struct MovableWindow : GameWindowData
-{
-    void OnMouseDown(int index) override;
-    void UpdateDrag(int index) override;
-    void DrawStrategyMark(HDC hdc, RECT rc, COLORREF color) const override;
-};
-
-struct ResizableWindow : GameWindowData
-{
-    void OnMouseDown(int index) override;
-    void UpdateResize(int index) override;
-    void DrawStrategyMark(HDC hdc, RECT rc, COLORREF color) const override;
-};
-
-struct UnconstrainedWindow : GameWindowData
-{
-    void OnMouseDown(int index) override;
-    void UpdateResize(int index) override;
-    void DrawStrategyMark(HDC hdc, RECT rc, COLORREF color) const override;
-};
-
-struct MinimizableWindow : GameWindowData
-{
-    void OnMouseDown(int index) override;
-    void DrawStrategyMark(HDC hdc, RECT rc, COLORREF color) const override;
-};
-
-struct DeletableWindow : GameWindowData
-{
-    void DrawStrategyMark(HDC hdc, RECT rc, COLORREF color) const override;
 };
 
 /* ---- Strategy_HandleButtonClickのswitch文を置き換えるボタン派生クラス群。 ---- */
@@ -300,9 +302,9 @@ public:
     GameWindowData &operator[](int i) { return *slots_[i]; }
     const GameWindowData &operator[](int i) const { return *slots_[i]; }
 
-    /* kindに応じた派生クラス(MovableWindow/ResizableWindow等)のインスタンスを
-       新しいスロットとして追加し、ゼロ初期化済みのポインタを返す
-       (std::make_uniqueによる値初期化は、フィールドをZeroMemoryしていた
+    /* kindに応じた派生クラス(ボタン系のみ、それ以外は基底GameWindowData)の
+       インスタンスを新しいスロットとして追加し、ゼロ初期化済みのポインタを
+       返す(std::make_uniqueによる値初期化は、フィールドをZeroMemoryしていた
        以前の実装と完全に等価 -- 仮想関数を持つようになった後もクラスに
        ユーザー定義コンストラクタが無い限りこの等価性は保たれる)。 */
     GameWindowData *Add(WindowKind kind);
@@ -334,8 +336,10 @@ extern int g_noEntryZoneCount;
 void RegisterGameWindowClass(HINSTANCE hInstance);
 void ResetWindowRegistry(void); /* 既存のゲームウィンドウを全て破棄し、配列をクリアする */
 
-int CreateGameWindowIndexed(HINSTANCE hInstance, WindowKind kind, int x, int y, int w, int h, const char *text);
-HWND CreateGameWindow(HINSTANCE hInstance, WindowKind kind, int x, int y, int w, int h, const char *text);
+int CreateGameWindowIndexed(HINSTANCE hInstance, WindowKind kind, WindowCapabilities caps,
+                             int x, int y, int w, int h, const char *text);
+HWND CreateGameWindow(HINSTANCE hInstance, WindowKind kind, WindowCapabilities caps,
+                      int x, int y, int w, int h, const char *text);
 
 void GetWindowFullBounds(HWND hwnd, RECT *out);
 int FindWindowIndex(HWND hwnd);
@@ -353,25 +357,39 @@ void MinimizeAnim_UpdateAll(float dt);
 void SetWindowAppearance(int index, COLORREF titleBarBg, COLORREF titleBarFg,
                           COLORREF outlineColor, const char *titleText);
 
-/* kind別のデフォルトisNoEntryだけを取り出す軽量アクセサ（ステージエディターの
-   パレットアイコンが、実際には生成していないkindのNoEntry表示を借りるため）。 */
-int WindowKind_IsNoEntry(WindowKind kind);
-
 /* このウィンドウが現在、実際に見た目としてミラー描画されている軸を返す
    （PaintGameWindowのStretchBlt判定と厳密に一致させる）:
-   自分自身がWT_UNCONSTRAINED*で負の論理サイズを持つ状態(own)と、
+   自分自身がWC_RESIZE_FLIP_X/Yを持ち負の論理サイズになっている状態(own)と、
    祖先の反転イベントで積算された永続フラグ(inherited)のXOR。
    WindowQuery_GetClientBounds（タイトルバー帯を上端/下端どちらから
    除外するか）など、描画以外で「今の見た目の向き」が必要な箇所からも呼ぶ。 */
 void GameWindow_GetEffectiveFlip(const GameWindowData *data, int *outFlipX, int *outFlipY);
+
+/* WC_MINIMIZEを持つウィンドウのタイトルバー右上に置く、最小化専用の当たり
+   判定/描画領域。ウィンドウ全体クリックでの最小化トグルは(Movable/Resizable
+   と同時に持てるようにするため)廃止し、この小さな領域をクリックした時だけ
+   最小化する。`fullBounds`はGetWindowFullBoundsの結果を渡す。 */
+RECT GetMinimizeButtonRect(RECT fullBounds);
+
+/* 片軸のみ(X軸のみ、またはY軸のみ)のリサイズ能力を持つウィンドウ専用:
+   ウィンドウ全体ではなく該当する縁（X軸のみなら右端、Y軸のみなら下端）を
+   つかんだ場合だけリサイズを開始できるようにする当たり判定帯（実際に
+   要望された挙動）。両軸とも持つウィンドウには使わない -- そちらは従来通り
+   ウィンドウ全体のクリックでリサイズを開始する。`fullBounds`は
+   GetWindowFullBoundsまたはGetWindowRectの結果を渡す（Strategy_HandleMouseDown/
+   GameWindowProcのWM_SETCURSOR両方で使うため、スクリーン座標系であることが
+   前提）。 */
+RECT GetResizeEdgeZoneRight(RECT fullBounds);
+RECT GetResizeEdgeZoneBottom(RECT fullBounds);
 
 /* Deletable戦略: 子要素を切り離し（破棄はせず親なし状態にする）、ウィンドウ自身も
    その親から切り離した上で破棄する。DeletableWindowStrategy.RemoveAndCloseと一致させる。
    既にトゥームストーン化済み（hwnd==NULL）のインデックスに対して呼んでも安全 -- 何もしない。 */
 void DeleteWindow(int index);
 
-/* 実際のプラットフォーム/ゲームウィンドウ（Normal*, Movable, Resizable, Minimizable,
-   NoEntry系）に対してtrueを返す -- ボタンとゴールマーカーは除外する。 */
+/* 実際のプラットフォーム/ゲームウィンドウ（Normal*、および任意の
+   capabilities組み合わせを持つそれら）に対してtrueを返す -- ボタンと
+   ゴールマーカーは除外する。 */
 int IsQueryableWindow(WindowKind kind);
 int IsButtonWindowKind(WindowKind kind);
 

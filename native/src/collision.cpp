@@ -39,7 +39,7 @@ static int IsNormalWindowVisibleFromExcluded(int windowIndex, int excludeIndex)
             return false;
         if (i == excludeParentIdx)
             return true;
-        return g_windows[i].isNoEntry != 0 && !g_windows[i].minimized;
+        return HasCapability(g_windows[i].capabilities, WC_NOENTRY) && !g_windows[i].minimized;
     };
     return NoEntry_ComputeVisibleRegion(windowIndex, windowBounds, isOccluder, nullptr);
 }
@@ -70,7 +70,7 @@ static int GatherObstacles(CollisionOptions opts, RECT *out, int maxOut)
             continue;
 #endif
 
-        if (d->isNoEntry)
+        if (HasCapability(d->capabilities, WC_NOENTRY))
         {
             /* NoEntry_GetBoundaryRects単体のAABBではなく、より前面の
                ウィンドウに隠れている部分を除外したNoEntry_GetVisibleBoundaryRects

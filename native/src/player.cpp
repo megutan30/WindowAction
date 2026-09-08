@@ -872,7 +872,7 @@ static void CheckHorizontalCollision(RECT bounds, float *moveX)
 
     for (int i = 0; i < g_windowCount; i++)
     {
-        if (!g_windows[i].isNoEntry || !g_windows[i].hwnd || g_windows[i].minimized)
+        if (!HasCapability(g_windows[i].capabilities, WC_NOENTRY) || !g_windows[i].hwnd || g_windows[i].minimized)
             continue;
         RECT wb;
         GetWindowFullBounds(g_windows[i].hwnd, &wb);
@@ -971,7 +971,7 @@ static void CheckVerticalCollision(RECT bounds, float *moveY, int *hitCeiling, i
 
     for (int i = 0; i < g_windowCount; i++)
     {
-        if (!g_windows[i].isNoEntry || !g_windows[i].hwnd || g_windows[i].minimized)
+        if (!HasCapability(g_windows[i].capabilities, WC_NOENTRY) || !g_windows[i].hwnd || g_windows[i].minimized)
             continue;
         RECT wb;
         GetWindowFullBounds(g_windows[i].hwnd, &wb);
@@ -1213,7 +1213,7 @@ static RECT HandleWindowCollisions(RECT proposed, RECT current, int *hitCeiling,
     for (int i = 0; i < g_windowCount; i++)
     {
         GameWindowData *d = &g_windows[i];
-        if (d->isNoEntry || IsButtonWindowKind(d->kind) || d->kind == WT_GOAL)
+        if (HasCapability(d->capabilities, WC_NOENTRY) || IsButtonWindowKind(d->kind) || d->kind == WT_GOAL)
             continue;
         if (!d->hwnd || d->minimized)
             continue;
@@ -1393,7 +1393,7 @@ static void CheckGroundedNormal(Player *p, float dt)
 
     for (int i = 0; i < g_windowCount; i++)
     {
-        if (!g_windows[i].isNoEntry || !g_windows[i].hwnd || g_windows[i].minimized)
+        if (!HasCapability(g_windows[i].capabilities, WC_NOENTRY) || !g_windows[i].hwnd || g_windows[i].minimized)
             continue;
         RECT bnd[4]; /* NoEntry_GetBoundaryRectsによる順序: 上, 下, 左, 右 */
         int c = NoEntry_GetBoundaryRects(i, bnd);
@@ -1498,7 +1498,7 @@ static void CheckGroundedNormal(Player *p, float dt)
         for (int k = 0; k < n; k++)
         {
             GameWindowData *d = &g_windows[idxs[k]];
-            if (d->isNoEntry)
+            if (HasCapability(d->capabilities, WC_NOENTRY))
                 continue;
             RECT wb;
             GetWindowFullBounds(d->hwnd, &wb);
@@ -1543,7 +1543,7 @@ static void CheckGroundedNormal(Player *p, float dt)
         for (int k = 0; k < n; k++)
         {
             GameWindowData *w = &g_windows[idxs[k]];
-            if (w->isNoEntry)
+            if (HasCapability(w->capabilities, WC_NOENTRY))
                 continue;
             RECT wb;
             GetWindowFullBounds(w->hwnd, &wb);
@@ -1663,7 +1663,7 @@ static void CheckGroundedInverted(Player *p, float dt)
 
     for (int i = 0; i < g_windowCount; i++)
     {
-        if (!g_windows[i].isNoEntry || !g_windows[i].hwnd || g_windows[i].minimized)
+        if (!HasCapability(g_windows[i].capabilities, WC_NOENTRY) || !g_windows[i].hwnd || g_windows[i].minimized)
             continue;
         RECT bnd[4]; /* NoEntry_GetBoundaryRectsによる順序: 上, 下, 左, 右 */
         int c = NoEntry_GetBoundaryRects(i, bnd);
@@ -1749,7 +1749,7 @@ static void CheckGroundedInverted(Player *p, float dt)
         for (int k = 0; k < n; k++)
         {
             GameWindowData *d = &g_windows[idxs[k]];
-            if (d->isNoEntry)
+            if (HasCapability(d->capabilities, WC_NOENTRY))
                 continue;
             RECT wb;
             GetWindowFullBounds(d->hwnd, &wb);
@@ -1789,7 +1789,7 @@ static void CheckGroundedInverted(Player *p, float dt)
         for (int k = 0; k < n; k++)
         {
             GameWindowData *w = &g_windows[idxs[k]];
-            if (w->isNoEntry)
+            if (HasCapability(w->capabilities, WC_NOENTRY))
                 continue;
             RECT wb;
             GetWindowFullBounds(w->hwnd, &wb);

@@ -129,7 +129,7 @@ void NoEntry_UpdateAnimation(float dt)
     const float SPEED = 40.0f; /* px/sec、現行のOutlineRendererと一致 */
     for (int i = 0; i < g_windowCount; i++)
     {
-        if (g_windows[i].isNoEntry)
+        if (HasCapability(g_windows[i].capabilities, WC_NOENTRY))
             g_windows[i].stripeOffset += SPEED * dt;
     }
 
@@ -144,7 +144,7 @@ void NoEntry_UpdateAnimation(float dt)
 int NoEntry_GetBoundaryRects(int windowIndex, RECT out[4])
 {
     GameWindowData *data = GetWindowData(windowIndex);
-    if (!data || !data->isNoEntry || !data->hwnd || data->minimized)
+    if (!data || !HasCapability(data->capabilities, WC_NOENTRY) || !data->hwnd || data->minimized)
         return 0;
 
     RECT b;
@@ -276,7 +276,7 @@ int NoEntry_IntersectsAny(RECT bounds)
 
     for (int i = 0; i < g_windowCount; i++)
     {
-        if (!g_windows[i].isNoEntry || !g_windows[i].hwnd || g_windows[i].minimized)
+        if (!HasCapability(g_windows[i].capabilities, WC_NOENTRY) || !g_windows[i].hwnd || g_windows[i].minimized)
             continue;
         if (IsBoundaryVisible(i, bounds))
             return 1;

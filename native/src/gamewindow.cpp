@@ -15,29 +15,15 @@ WindowRegistry g_windows;
 int g_windowCount = 0;
 int g_resizeGeneration = 0;
 
-/* C++移行フェーズ3: kindに応じた派生クラスのインスタンスを作るファクトリ。
-   WindowFactory.CreateWindow(C#版)に相当する、この設計で唯一避けられない
-   switch -- ここで一度だけ「どのクラスを作るか」を決め、以降の挙動は
-   virtual呼び出し(OnMouseDown/UpdateResize/DrawStrategyMark/OnClick)に
-   委ねる。NoEntry版は非NoEntry版と挙動が同一なので同じクラスを共有する。 */
+/* kindに応じた派生クラスのインスタンスを作るファクトリ。コンポーネント化に
+   より移動/リサイズ/最小化/削除の各振る舞いはcapabilitiesビットへ移った
+   （生成後にCreateGameWindowIndexedがdata->capabilitiesへ設定する）ため、
+   ここで区別が必要なのはボタン(OnClickの文言が種別ごとに違う)だけになった。
+   それ以外は全て基底のGameWindowDataで足りる。 */
 static std::unique_ptr<GameWindowData> MakeWindowInstance(WindowKind kind)
 {
     switch (kind)
     {
-    case WT_MOVABLE:
-    case WT_MOVABLE_NOENTRY:
-        return std::make_unique<MovableWindow>();
-    case WT_RESIZABLE:
-    case WT_RESIZABLE_NOENTRY:
-        return std::make_unique<ResizableWindow>();
-    case WT_UNCONSTRAINED:
-    case WT_UNCONSTRAINED_NOENTRY:
-        return std::make_unique<UnconstrainedWindow>();
-    case WT_MINIMIZABLE:
-    case WT_MINIMIZABLE_NOENTRY:
-        return std::make_unique<MinimizableWindow>();
-    case WT_DELETABLE:
-        return std::make_unique<DeletableWindow>();
     case WT_BTN_START:
         return std::make_unique<StartButton>();
     case WT_BTN_RETRY:
@@ -84,7 +70,7 @@ static const int STRIPE_WIDTH = 20;
 
 /* Draw*Markファミリー(DrawMovableMark/DrawResizableMark/DrawDeletableMark)
    共通の寸法: 中心からの半径と矢印/角の長さ。 */
-static const int MARK_RADIUS = 18;
+static const int MARK_RADIUS = 30;
 static const int MARK_ARROW_LEN = 6;
 static const int MARK_PEN_WIDTH = 3;
 /* DrawMinimizableMarkのバー半分の寸法。MinimizableWindowStrategy.
@@ -130,74 +116,64 @@ static int HasChrome(WindowKind kind)
     return kind != WT_GOAL && !IsButtonWindowKind(kind);
 }
 
-/* kind別のデフォルト配色/solid/isNoEntryを返す。CreateGameWindowIndexedの
-   ウィンドウ生成時と、PaintGameWindowのパレットアイコン描画（実際には
-   生成しないwindowKindの見た目だけを借りる）の両方から使う共通ロジック。 */
-static void GetKindAppearance(WindowKind kind, COLORREF *bg, COLORREF *fg, int *solid, int *isNoEntry)
+/* kind別のデフォルト配色/solidを返す。CreateGameWindowIndexedのウィンドウ
+   生成時と、PaintGameWindowのパレットアイコン描画（実際には生成しない
+   windowKindの見た目だけを借りる）の両方から使う共通ロジック。
+   コンポーネント化により移動/リサイズ/最小化/削除/NoEntryはcapabilitiesへ
+   移ったため、kind別の配色は「黒地/白地」の土台だけを決め、実際にどの
+   振る舞いを持つかはDrawStrategyMarkが描く重ね合わせマークで示す
+   （1つの背景色で複数の振る舞いを同時に表現しようとすると、組み合わせの
+   数だけ色を用意する必要が再発してしまうため）。 */
+static void GetKindAppearance(WindowKind kind, WindowCapabilities caps, COLORREF *bg, COLORREF *fg, int *solid)
 {
     *solid = 1;
-    *isNoEntry = 0;
     switch (kind)
     {
     case WT_NORMAL_BLACK:
-        *bg = RGB(0, 0, 0);
-        *fg = RGB(255, 255, 255);
-        break;
     case WT_NORMAL_WHITE:
-        *bg = RGB(255, 255, 255);
-        *fg = RGB(0, 0, 0);
+        /* 以前はWT_MOVABLE/WT_RESIZABLE/WT_MINIMIZABLE/WT_DELETABLE/
+           WT_UNCONSTRAINEDという専用kindがそれぞれ固定の背景色を持っていた
+           （NoEntry有無に関わらず同じ色）。コンポーネント化でこれらの振る舞いは
+           capabilitiesビットへ移ったため、色分けもcapabilitiesから決める。
+           優先順位は元のkindの排他性を保つよう単純に決めた: 反転可能な
+           リサイズ(Unconstrained相当)を最優先、次にリサイズ、次に移動、
+           最後に最小化/削除（元々この2つは同じ色を共有していた）。
+           どの振る舞いも持たない場合のみkind本来の黒地/白地を使う。 */
+        if (HasCapability(caps, WC_RESIZE_FLIP_X) || HasCapability(caps, WC_RESIZE_FLIP_Y))
+        {
+            *bg = RGB(221, 160, 221);
+            *fg = RGB(0, 0, 0);
+        }
+        else if (HasCapability(caps, WC_RESIZE_X) || HasCapability(caps, WC_RESIZE_Y))
+        {
+            *bg = RGB(144, 238, 144);
+            *fg = RGB(0, 0, 0);
+        }
+        else if (HasCapability(caps, WC_MOVE_X) || HasCapability(caps, WC_MOVE_Y))
+        {
+            *bg = RGB(173, 216, 230);
+            *fg = RGB(0, 0, 0);
+        }
+        else if (HasCapability(caps, WC_MINIMIZE) || HasCapability(caps, WC_DELETE))
+        {
+            *bg = RGB(255, 182, 193);
+            *fg = RGB(0, 0, 0);
+        }
+        else if (kind == WT_NORMAL_BLACK)
+        {
+            *bg = RGB(0, 0, 0);
+            *fg = RGB(255, 255, 255);
+        }
+        else
+        {
+            *bg = RGB(255, 255, 255);
+            *fg = RGB(0, 0, 0);
+        }
         break;
     case WT_TEXT_DISPLAY:
         *bg = RGB(0, 0, 0);
         *fg = RGB(255, 255, 255);
         *solid = 0;
-        break;
-    case WT_MOVABLE:
-        *bg = RGB(173, 216, 230);
-        *fg = RGB(0, 0, 0);
-        break;
-    case WT_RESIZABLE:
-        *bg = RGB(144, 238, 144);
-        *fg = RGB(0, 0, 0);
-        break;
-    case WT_MINIMIZABLE:
-    case WT_DELETABLE:
-        *bg = RGB(255, 182, 193);
-        *fg = RGB(0, 0, 0);
-        break;
-    case WT_NORMAL_BLACK_NOENTRY:
-        *bg = RGB(0, 0, 0);
-        *fg = RGB(255, 255, 255);
-        *isNoEntry = 1;
-        break;
-    case WT_NORMAL_WHITE_NOENTRY:
-        *bg = RGB(255, 255, 255);
-        *fg = RGB(0, 0, 0);
-        *isNoEntry = 1;
-        break;
-    case WT_RESIZABLE_NOENTRY:
-        *bg = RGB(144, 238, 144);
-        *fg = RGB(0, 0, 0);
-        *isNoEntry = 1;
-        break;
-    case WT_MOVABLE_NOENTRY:
-        *bg = RGB(173, 216, 230);
-        *fg = RGB(0, 0, 0);
-        *isNoEntry = 1;
-        break;
-    case WT_MINIMIZABLE_NOENTRY:
-        *bg = RGB(255, 182, 193);
-        *fg = RGB(0, 0, 0);
-        *isNoEntry = 1;
-        break;
-    case WT_UNCONSTRAINED:
-        *bg = RGB(221, 160, 221);
-        *fg = RGB(0, 0, 0);
-        break;
-    case WT_UNCONSTRAINED_NOENTRY:
-        *bg = RGB(221, 160, 221);
-        *fg = RGB(0, 0, 0);
-        *isNoEntry = 1;
         break;
     case WT_GOAL:
         *bg = RGB(255, 0, 255);
@@ -229,18 +205,10 @@ static void GetKindAppearance(WindowKind kind, COLORREF *bg, COLORREF *fg, int *
     }
 }
 
-int WindowKind_IsNoEntry(WindowKind kind)
-{
-    COLORREF bg, fg;
-    int solid, isNoEntry;
-    GetKindAppearance(kind, &bg, &fg, &solid, &isNoEntry);
-    return isNoEntry;
-}
-
 void GameWindow_GetEffectiveFlip(const GameWindowData *data, int *outFlipX, int *outFlipY)
 {
-    int ownFlipX = (data->kind == WT_UNCONSTRAINED || data->kind == WT_UNCONSTRAINED_NOENTRY) && data->logicalW < 0;
-    int ownFlipY = (data->kind == WT_UNCONSTRAINED || data->kind == WT_UNCONSTRAINED_NOENTRY) && data->logicalH < 0;
+    int ownFlipX = HasCapability(data->capabilities, WC_RESIZE_FLIP_X) && data->logicalW < 0;
+    int ownFlipY = HasCapability(data->capabilities, WC_RESIZE_FLIP_Y) && data->logicalH < 0;
     *outFlipX = ownFlipX ^ data->inheritedFlipX;
     *outFlipY = ownFlipY ^ data->inheritedFlipY;
 }
@@ -436,7 +404,10 @@ static void DrawClockwiseStripeBorder(HDC hdc, RECT rc, float offset)
     DrawClockwiseSide(hdc, left, 0, 0, 2 * w + h, h, phaseLeft);
 }
 
-static void DrawMovableMark(HDC hdc, RECT rc, COLORREF color)
+/* Movableマークの水平方向(左右矢印)成分。片軸のみ(X軸のみ)の場合は
+   これだけを中央に描く（実際に要望された挙動 -- リサイズと違い、位置は
+   片軸/両軸に関わらず常に中央のまま、形だけがその軸に合わせて変わる）。 */
+static void DrawMovableMarkHorizontal(HDC hdc, RECT rc, COLORREF color)
 {
     int cx = (rc.left + rc.right) / 2;
     int cy = (rc.top + rc.bottom) / 2;
@@ -446,8 +417,6 @@ static void DrawMovableMark(HDC hdc, RECT rc, COLORREF color)
 
     MoveToEx(hdc, cx - r, cy, NULL);
     LineTo(hdc, cx + r, cy);
-    MoveToEx(hdc, cx, cy - r, NULL);
-    LineTo(hdc, cx, cy + r);
 
     int a = MARK_ARROW_LEN;
     MoveToEx(hdc, cx - r, cy, NULL);
@@ -458,6 +427,22 @@ static void DrawMovableMark(HDC hdc, RECT rc, COLORREF color)
     LineTo(hdc, cx + r - a, cy - a);
     MoveToEx(hdc, cx + r, cy, NULL);
     LineTo(hdc, cx + r - a, cy + a);
+}
+
+/* Movableマークの垂直方向(上下矢印)成分。片軸のみ(Y軸のみ)の場合は
+   これだけを中央に描く。 */
+static void DrawMovableMarkVertical(HDC hdc, RECT rc, COLORREF color)
+{
+    int cx = (rc.left + rc.right) / 2;
+    int cy = (rc.top + rc.bottom) / 2;
+    int r = MARK_RADIUS;
+    GdiPen pen(PS_SOLID, MARK_PEN_WIDTH, color);
+    ScopedSelectObject selectPen(hdc, pen);
+
+    MoveToEx(hdc, cx, cy - r, NULL);
+    LineTo(hdc, cx, cy + r);
+
+    int a = MARK_ARROW_LEN;
     MoveToEx(hdc, cx, cy - r, NULL);
     LineTo(hdc, cx - a, cy - r + a);
     MoveToEx(hdc, cx, cy - r, NULL);
@@ -466,6 +451,14 @@ static void DrawMovableMark(HDC hdc, RECT rc, COLORREF color)
     LineTo(hdc, cx - a, cy + r - a);
     MoveToEx(hdc, cx, cy + r, NULL);
     LineTo(hdc, cx + a, cy + r - a);
+}
+
+/* 両軸(X軸+Y軸)とも持つ場合の従来通りの4方向十字マーク。水平・垂直
+   成分をそのまま重ねるだけ。 */
+static void DrawMovableMark(HDC hdc, RECT rc, COLORREF color)
+{
+    DrawMovableMarkHorizontal(hdc, rc, color);
+    DrawMovableMarkVertical(hdc, rc, color);
 }
 
 static void DrawResizableMark(HDC hdc, RECT rc, COLORREF color)
@@ -487,6 +480,45 @@ static void DrawResizableMark(HDC hdc, RECT rc, COLORREF color)
     LineTo(hdc, cx + r - a, cy + r);
     MoveToEx(hdc, cx + r, cy + r, NULL);
     LineTo(hdc, cx + r, cy + r - a);
+}
+
+/* 片軸のみのリサイズ(X軸のみ)の目印。ウィンドウ右端いっぱいに、右向き矢印を
+   縦方向中央に置く -- 右端をつかむとリサイズできることを示す
+   （実際に要望された挙動。GetResizeEdgeZoneRightの当たり判定帯と対応）。 */
+static void DrawResizeEdgeMarkRight(HDC hdc, RECT rc, COLORREF color)
+{
+    int cy = (rc.top + rc.bottom) / 2;
+    int tipX = rc.right - 6;
+    int tailX = tipX - MARK_RADIUS;
+    GdiPen pen(PS_SOLID, MARK_PEN_WIDTH, color);
+    ScopedSelectObject selectPen(hdc, pen);
+
+    MoveToEx(hdc, tailX, cy, NULL);
+    LineTo(hdc, tipX, cy);
+    int a = MARK_ARROW_LEN;
+    MoveToEx(hdc, tipX, cy, NULL);
+    LineTo(hdc, tipX - a, cy - a);
+    MoveToEx(hdc, tipX, cy, NULL);
+    LineTo(hdc, tipX - a, cy + a);
+}
+
+/* 片軸のみのリサイズ(Y軸のみ)の目印。ウィンドウ下端いっぱいに、下向き矢印を
+   横方向中央に置く（GetResizeEdgeZoneBottomの当たり判定帯と対応）。 */
+static void DrawResizeEdgeMarkBottom(HDC hdc, RECT rc, COLORREF color)
+{
+    int cx = (rc.left + rc.right) / 2;
+    int tipY = rc.bottom - 6;
+    int tailY = tipY - MARK_RADIUS;
+    GdiPen pen(PS_SOLID, MARK_PEN_WIDTH, color);
+    ScopedSelectObject selectPen(hdc, pen);
+
+    MoveToEx(hdc, cx, tailY, NULL);
+    LineTo(hdc, cx, tipY);
+    int a = MARK_ARROW_LEN;
+    MoveToEx(hdc, cx, tipY, NULL);
+    LineTo(hdc, cx - a, tipY - a);
+    MoveToEx(hdc, cx, tipY, NULL);
+    LineTo(hdc, cx + a, tipY - a);
 }
 
 static void DrawMinimizableMark(HDC hdc, RECT rc, COLORREF color)
@@ -562,34 +594,128 @@ static void DrawGoalMark(HDC hdc, RECT rc)
     StretchBlt(hdc, rc.left, rc.top, w, h, refDC, 0, 0, REF, REF, SRCCOPY);
 }
 
-/* kindに対応するストラテジーマーク（あれば）を描画する。PaintGameWindowの
-   通常描画と、ステージエディターのパレットアイコン描画（「配置される実際の
-   種別」の見た目を借りるだけで実際にはそのkindのウィンドウではない）の
-   両方から呼べる共通ロジック。マークを持たない種別（Normal/TextDisplay等）
-   は何も描かない。 */
-static void DrawKindMark(HDC hdc, RECT rc, WindowKind kind, COLORREF markColor)
+/* capabilitiesに対応するストラテジーマークを重ねて描画する。PaintGameWindowの
+   通常描画と、ステージエディターのパレットアイコン描画（「配置予定の
+   capabilities」の見た目を借りるだけで実際にはまだ生成されていない）の
+   両方から呼べる共通ロジック。組み合わせを自由に持てるようになったため、
+   1つの背景色で表現する代わりに、立っているビットの数だけマークを重ねて
+   描く。WC_MINIMIZEは専用の最小化ボタン(GetMinimizeButtonRect、タイトル
+   バー上)で別途描画するため、ここには含めない -- ウィンドウ全体クリックでの
+   最小化を廃止したのに合わせ、Movable/Resizableのマークと重なってしまう
+   中央の大きなバーマークも廃止した。 */
+/* markColorはMove/Deleteマークに使う（従来通り、ウィンドウ全体のホバーで
+   白/グレーが決まる）。resizeColorはリサイズマーク専用の色で、呼び出し側
+   (PaintGameWindow)が「今この位置でリサイズを開始できるか」を別途判定して
+   渡す -- 片軸のみのリサイズは縁をつかんだ場合しか操作できないため、
+   ウィンドウ全体のホバーでマークが白くなってしまうと実際の操作可能範囲と
+   見た目が食い違ってしまう（実際に報告された不具合）。 */
+static void DrawKindMark(HDC hdc, RECT rc, WindowCapabilities caps, COLORREF markColor, COLORREF resizeColor)
 {
-    if (kind == WT_MOVABLE || kind == WT_MOVABLE_NOENTRY)
+    /* Moveは位置こそ常に中央のままだが（リサイズと違いウィンドウ全体で
+       操作できることに変わりはない）、片軸のみなら矢印もその軸方向だけの
+       形にする -- 実際に持っている能力とマークの見た目を一致させるための
+       要望。両軸そろえば従来通りの4方向十字マーク。 */
+    int moveX = HasCapability(caps, WC_MOVE_X);
+    int moveY = HasCapability(caps, WC_MOVE_Y);
+    if (moveX && moveY)
         DrawMovableMark(hdc, rc, markColor);
-    else if (kind == WT_RESIZABLE || kind == WT_RESIZABLE_NOENTRY ||
-             kind == WT_UNCONSTRAINED || kind == WT_UNCONSTRAINED_NOENTRY)
-        DrawResizableMark(hdc, rc, markColor);
-    else if (kind == WT_MINIMIZABLE || kind == WT_MINIMIZABLE_NOENTRY)
-        DrawMinimizableMark(hdc, rc, markColor);
-    else if (kind == WT_DELETABLE)
+    else if (moveX)
+        DrawMovableMarkHorizontal(hdc, rc, markColor);
+    else if (moveY)
+        DrawMovableMarkVertical(hdc, rc, markColor);
+
+    /* 片軸のみ(X軸のみ/Y軸のみ)なら該当する縁に矢印マークを、両軸持つ場合は
+       従来通り中央に斜め矢印マークを出す（実際に要望された挙動）。片軸のみの
+       場合、リサイズ操作自体もウィンドウ全体ではなくその縁をつかんだ場合に
+       限られる（Strategy.cのGameWindowData::OnMouseDown参照）ため、マークの
+       位置を操作可能な場所と一致させている。 */
+    int resizeX = HasCapability(caps, WC_RESIZE_X);
+    int resizeY = HasCapability(caps, WC_RESIZE_Y);
+    if (resizeX && resizeY)
+        DrawResizableMark(hdc, rc, resizeColor);
+    else if (resizeX)
+        DrawResizeEdgeMarkRight(hdc, rc, resizeColor);
+    else if (resizeY)
+        DrawResizeEdgeMarkBottom(hdc, rc, resizeColor);
+
+    if (HasCapability(caps, WC_DELETE))
         DrawDeletableMark(hdc, rc, markColor);
 }
 
-/* DrawKindMarkのswitch分岐を仮想関数のオーバーライドへ置き換えたもの。
-   ステージエディターのパレットアイコン(paletteKindという「実際にはこの
-   オブジェクトの種別ではない、配置予定の種別」のプレビュー)だけは特定の
-   オブジェクトに紐付かない値ベースの描画が必要なため、DrawKindMark
-   (kindを引数に取る自由関数)自体は残し、そちらから引き続き使う。 */
-void MovableWindow::DrawStrategyMark(HDC hdc, RECT rc, COLORREF color) const { DrawMovableMark(hdc, rc, color); }
-void ResizableWindow::DrawStrategyMark(HDC hdc, RECT rc, COLORREF color) const { DrawResizableMark(hdc, rc, color); }
-void UnconstrainedWindow::DrawStrategyMark(HDC hdc, RECT rc, COLORREF color) const { DrawResizableMark(hdc, rc, color); }
-void MinimizableWindow::DrawStrategyMark(HDC hdc, RECT rc, COLORREF color) const { DrawMinimizableMark(hdc, rc, color); }
-void DeletableWindow::DrawStrategyMark(HDC hdc, RECT rc, COLORREF color) const { DrawDeletableMark(hdc, rc, color); }
+/* 通常のボタン(IsWindowHovered参照、200,200,200→230,230,230)と同じ考え方で、
+   色を明るくする方向に固定量だけずらす。最小化ボタンのホバー時ハイライトに
+   使う。 */
+static COLORREF LightenColor(COLORREF c, int amount)
+{
+    int r = GetRValue(c) + amount;
+    int g = GetGValue(c) + amount;
+    int b = GetBValue(c) + amount;
+    if (r > 255) r = 255;
+    if (g > 255) g = 255;
+    if (b > 255) b = 255;
+    return RGB(r, g, b);
+}
+
+/* タイトルバー右上の小さな最小化ボタンの見た目。中央の大きなバーマーク
+   (DrawMinimizableMark、固定60x10px前提)は小さなボタン矩形には合わないため
+   専用に用意する -- 渡された矩形いっぱいに収まる細い水平バーを描くだけ。
+   ボタン自体の背景は非ホバー時もタイトルバーとまったく同じ色にはせず
+   少し明るくして、ボタンとして独立していることが分かるようにする。
+   ホバー時はさらに明るくして、通常ボタンのIsWindowHovered同様のホバー反応を
+   出す。マークの色は最小化ボタンの背景（タイトルバー同系色）に対して
+   はっきり見えるよう白で固定する（実際に要望された挙動）。 */
+static void DrawMinimizeButtonGlyph(HDC hdc, RECT rc, COLORREF titleBarBg, int hovered)
+{
+    GdiBrush bgBrush(LightenColor(titleBarBg, hovered ? 55 : 20));
+    FillRect(hdc, &rc, bgBrush);
+
+    /* マークはボタン矩形の中央に来るよう、水平・垂直とも中心基準で配置する
+       （以前は下寄せの「最小化ダッシュ」風だったが、ボタンとして中央に
+       あった方が分かりやすいという要望）。 */
+    GdiBrush brush(RGB(255, 255, 255));
+    const int MARK_MARGIN = 6;
+    const int MARK_HEIGHT = 3;
+    int centerY = (rc.top + rc.bottom) / 2;
+    RECT bar = {rc.left + MARK_MARGIN, centerY - MARK_HEIGHT / 2,
+                rc.right - MARK_MARGIN, centerY - MARK_HEIGHT / 2 + MARK_HEIGHT};
+    FillRect(hdc, &bar, brush);
+}
+
+void GameWindowData::DrawStrategyMark(HDC hdc, RECT rc, COLORREF color, COLORREF resizeColor) const
+{
+    DrawKindMark(hdc, rc, capabilities, color, resizeColor);
+}
+
+RECT GetMinimizeButtonRect(RECT fullBounds)
+{
+    const int SIZE = 24;
+    const int MARGIN = 4;
+    RECT r;
+    r.right = fullBounds.right - MARGIN;
+    r.left = r.right - SIZE;
+    r.top = fullBounds.top + (TITLE_BAR_HEIGHT - SIZE) / 2;
+    r.bottom = r.top + SIZE;
+    return r;
+}
+
+/* 実際に使ってみると10pxでは掴みにくいという要望があったため広げた値。
+   縁そのものより少しウィンドウ内側へ広く取ることで、境界ぎりぎりを
+   正確に狙わなくても縁をつかめるようにする。 */
+#define RESIZE_EDGE_ZONE_THICKNESS 18
+
+RECT GetResizeEdgeZoneRight(RECT fullBounds)
+{
+    RECT r = fullBounds;
+    r.left = r.right - RESIZE_EDGE_ZONE_THICKNESS;
+    return r;
+}
+
+RECT GetResizeEdgeZoneBottom(RECT fullBounds)
+{
+    RECT r = fullBounds;
+    r.top = r.bottom - RESIZE_EDGE_ZONE_THICKNESS;
+    return r;
+}
 
 /* ゲーム描画のタイトルバー帯（クライアント領域最上部TITLE_BAR_HEIGHT px）を
    描画する。WS_CAPTIONを使わなくなったため、OS標準のタイトルバーの代わりに
@@ -621,20 +747,13 @@ static void DrawTitleBar(HDC hdc, RECT rc, GameWindowData *data)
     DrawTextA(hdc, title, -1, &textRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 }
 
-static int IsWindowHovered(int index)
+/* WindowRenderingManager.DrawWindowMark: この位置でカーソルをより前面の
+   ウィンドウが覆っている場合、indexのウィンドウはこの位置でホバー中とは
+   みなさない。IsWindowHovered/IsMinimizeButtonHovered/IsResizeActionable
+   共通のZ-order考慮ロジック（以前はそれぞれが同じループを個別に持っていた）。 */
+static int IsPointUnoccludedForWindow(int index, POINT cur)
 {
     GameWindowData *data = &g_windows[index];
-    POINT cur;
-    GetCursorPos(&cur);
-
-    RECT wb;
-    GetWindowFullBounds(data->hwnd, &wb);
-    if (cur.x < wb.left || cur.x >= wb.right || cur.y < wb.top || cur.y >= wb.bottom)
-        return 0;
-
-    /* WindowRenderingManager.DrawWindowMark: この位置でカーソルをより前面の
-       ウィンドウが覆っている場合、このウィンドウのマークはホバー中とは
-       みなされない。 */
     int myZ = ZOrder_GetIndex(data->hwnd);
     for (int i = 0; i < g_windowCount; i++)
     {
@@ -648,6 +767,71 @@ static int IsWindowHovered(int index)
             return 0;
     }
     return 1;
+}
+
+static int IsWindowHovered(int index)
+{
+    GameWindowData *data = &g_windows[index];
+    POINT cur;
+    GetCursorPos(&cur);
+
+    RECT wb;
+    GetWindowFullBounds(data->hwnd, &wb);
+    if (cur.x < wb.left || cur.x >= wb.right || cur.y < wb.top || cur.y >= wb.bottom)
+        return 0;
+
+    return IsPointUnoccludedForWindow(index, cur);
+}
+
+/* IsWindowHoveredと同じZ-order考慮のホバー判定を、ウィンドウ全体ではなく
+   タイトルバー右上の最小化ボタン矩形だけに絞って行う。WM_LBUTTONDOWNの
+   当たり判定(GameWindowProc参照)と同じくスクリーン座標で計算する
+   （GetCursorPosがスクリーン座標を返すため）。 */
+static int IsMinimizeButtonHovered(int index)
+{
+    GameWindowData *data = &g_windows[index];
+    RECT full;
+    GetWindowFullBounds(data->hwnd, &full);
+    RECT btnRect = GetMinimizeButtonRect(full);
+
+    POINT cur;
+    GetCursorPos(&cur);
+    if (!PtInRect(&btnRect, cur))
+        return 0;
+
+    return IsPointUnoccludedForWindow(index, cur);
+}
+
+/* リサイズマークの色を決めるための判定: 「今この位置でリサイズを開始できる
+   か」を返す（IsWindowHoveredのような単純な全体ホバーではない）。両軸持つ
+   ウィンドウはウィンドウ全体が操作可能域なのでIsWindowHoveredと同じ、
+   片軸のみのウィンドウは該当する縁（GetResizeEdgeZoneRight/Bottom、
+   Strategy.cのOnMouseDown/GameWindowProcのWM_SETCURSORと同じ判定帯）に
+   カーソルが乗っている場合だけ真になる。既にリサイズ中の場合は、ドラッグ中に
+   カーソルが縁から一時的に外れてもマークが消えないよう常に真とする
+   （WM_SETCURSORのカーソル維持と同じ考え方）。 */
+static int IsResizeActionable(int index)
+{
+    GameWindowData *data = &g_windows[index];
+    int resizeX = HasCapability(data->capabilities, WC_RESIZE_X);
+    int resizeY = HasCapability(data->capabilities, WC_RESIZE_Y);
+    if (!resizeX && !resizeY)
+        return 0;
+    if (data->resizing)
+        return 1;
+    if (resizeX && resizeY)
+        return IsWindowHovered(index);
+
+    RECT full;
+    GetWindowFullBounds(data->hwnd, &full);
+    RECT edge = resizeX ? GetResizeEdgeZoneRight(full) : GetResizeEdgeZoneBottom(full);
+
+    POINT cur;
+    GetCursorPos(&cur);
+    if (!PtInRect(&edge, cur))
+        return 0;
+
+    return IsPointUnoccludedForWindow(index, cur);
 }
 
 static void PaintGameWindow(HWND hwnd, int index)
@@ -674,8 +858,8 @@ static void PaintGameWindow(HWND hwnd, int index)
         /* パレットアイコンは灰色ボタンではなく、配置される実際の種別の背景色を
            そのまま表示する（一目で何を置けるか分かるようにする）。 */
         COLORREF pbg, pfg;
-        int psolid, pIsNoEntry;
-        GetKindAppearance(data->paletteKind, &pbg, &pfg, &psolid, &pIsNoEntry);
+        int psolid;
+        GetKindAppearance(data->paletteKind, data->paletteCaps, &pbg, &pfg, &psolid);
         fillColor = pbg;
     }
     else
@@ -690,7 +874,19 @@ static void PaintGameWindow(HWND hwnd, int index)
 
     int hasChrome = HasChrome(data->kind);
     if (hasChrome)
+    {
         DrawTitleBar(memDC, rc, data);
+        /* 最小化ボタン: 以前は「ウィンドウ全体をクリックすると最小化」だったが、
+           これだとMovable/Resizableと同時に持たせた際にドラッグ開始と
+           衝突するため、タイトルバー右上の専用ボタンだけで最小化するように
+           変更した（GameWindowProcのWM_LBUTTONDOWNが同じ矩形で当たり判定
+           する）。 */
+        if (HasCapability(data->capabilities, WC_MINIMIZE))
+        {
+            COLORREF barBg = data->hasCustomAppearance ? data->titleBarBg : RGB(45, 45, 48);
+            DrawMinimizeButtonGlyph(memDC, GetMinimizeButtonRect(rc), barBg, IsMinimizeButtonHovered(index));
+        }
+    }
 
     /* タイトルバー帯を持つ種別は、マーク/ラベルをその下のクライアント領域
        だけに収める（帯と重ならないようにする）。 */
@@ -698,45 +894,42 @@ static void PaintGameWindow(HWND hwnd, int index)
     if (hasChrome)
         contentRc.top += TITLE_BAR_HEIGHT;
 
-    switch (data->kind)
+    /* 以前はここでkindのswitch文を使い「マークを持つ種別」を列挙していたが、
+       コンポーネント化によりMovable/Resizable/Minimizable/Deletableという
+       別々のkindが無くなった（任意のcapabilities組み合わせを持つ通常の
+       WT_NORMAL_BLACK/WHITE等になった）ため、Goal/パレット/ボタン以外は
+       一律にDrawStrategyMarkを呼び、実際に何か描くかどうかはcapabilitiesの
+       有無に委ねる。 */
+    if (data->kind == WT_GOAL)
     {
-    case WT_MOVABLE:
-    case WT_RESIZABLE:
-    case WT_MINIMIZABLE:
-    case WT_DELETABLE:
-    case WT_MOVABLE_NOENTRY:
-    case WT_RESIZABLE_NOENTRY:
-    case WT_MINIMIZABLE_NOENTRY:
-    case WT_UNCONSTRAINED:
-    case WT_UNCONSTRAINED_NOENTRY:
+        DrawGoalMark(memDC, contentRc);
+    }
+#ifdef ENABLE_STAGE_EDITOR
+    else if (data->kind == WT_BTN_PALETTE)
+    {
+        /* パレットアイコンは「配置される実際のcapabilities」のマークをそのまま
+           表示する（灰色ボタンに文字ラベルだけ、ではなく一目で分かるように
+           する）。プレイヤー開始位置はpaletteKind/paletteCapsを見た目の
+           背景色を借りるためだけに使っており実際にはウィンドウを配置しない
+           ため、紛らわしい種別マーク（Movableの矢印等）は描かず、テキスト
+           ラベル"Player"のみにする。 */
+        if (!data->paletteIsPlayerStart)
+            DrawKindMark(memDC, contentRc, data->paletteCaps, RGB(255, 255, 255), RGB(255, 255, 255));
+        if (HasCapability(data->paletteCaps, WC_NOENTRY))
+            DrawClockwiseStripeBorder(memDC, rc, data->stripeOffset);
+    }
+#endif
+    else if (!IsButtonWindowKind(data->kind))
     {
         /* StrategyMarkUtility.GetMarkColor: ホバー中は白、それ以外は中間グレー。
-           どのマークを描くかはdata自身の実行時型(MovableWindow等、
-           WindowRegistry::Addのファクトリでkindに応じて選ばれている)に
-           委ねる仮想呼び出し -- 以前はここでもう一度kindを見て分岐していた。 */
+           リサイズマークだけは「今この位置でリサイズを開始できるか」
+           (IsResizeActionable)で白/グレーを決める -- 片軸のみのリサイズは
+           縁をつかんだ場合しか操作できないため、ウィンドウ全体のホバーで
+           白くなると実際の操作可能範囲と見た目が食い違ってしまう
+           （実際に報告された不具合）。 */
         COLORREF markColor = IsWindowHovered(index) ? RGB(255, 255, 255) : RGB(128, 128, 128);
-        data->DrawStrategyMark(memDC, contentRc, markColor);
-        break;
-    }
-    case WT_GOAL:
-        DrawGoalMark(memDC, contentRc);
-        break;
-#ifdef ENABLE_STAGE_EDITOR
-    case WT_BTN_PALETTE:
-        /* パレットアイコンは「配置される実際の種別」のマークをそのまま表示する
-           （灰色ボタンに文字ラベルだけ、ではなく一目で分かるようにする）。
-           プレイヤー開始位置はpaletteKindを見た目の背景色を借りるためだけに
-           使っており実際にはその種別のウィンドウを配置しないため、紛らわしい
-           種別マーク（Movableの矢印等）は描かず、テキストラベル"Player"のみに
-           する。 */
-        if (!data->paletteIsPlayerStart)
-            DrawKindMark(memDC, contentRc, data->paletteKind, RGB(255, 255, 255));
-        if (data->paletteIsNoEntry)
-            DrawClockwiseStripeBorder(memDC, rc, data->stripeOffset);
-        break;
-#endif
-    default:
-        break;
+        COLORREF resizeMarkColor = IsResizeActionable(index) ? RGB(255, 255, 255) : RGB(128, 128, 128);
+        data->DrawStrategyMark(memDC, contentRc, markColor, resizeMarkColor);
     }
 
     if (data->text[0] != '\0' && data->kind != WT_GOAL)
@@ -758,7 +951,7 @@ static void PaintGameWindow(HWND hwnd, int index)
         DrawTextA(memDC, data->text, -1, &contentRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_WORDBREAK);
     }
 
-    if (data->isNoEntry)
+    if (HasCapability(data->capabilities, WC_NOENTRY))
     {
         DrawClockwiseStripeBorder(memDC, rc, data->stripeOffset);
     }
@@ -990,6 +1183,46 @@ static LRESULT CALLBACK GameWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
        （非クライアント領域を持たない）になったため、DefWindowProcAは常に
        HTCLIENTを返す。移動/リサイズは元々OSの非クライアントドラッグではなく
        独自のマウスポーリング（Strategy_UpdateAll）で行っている。 */
+    case WM_SETCURSOR:
+        /* 片軸のみ(X軸のみ/Y軸のみ)のリサイズ能力を持つウィンドウは、該当する
+           縁（当たり判定はGetResizeEdgeZoneRight/Bottom、Strategy.cの
+           OnMouseDownと共通）にカーソルが乗っている間だけ、OS標準の
+           リサイズカーソル（左右/上下矢印）に切り替える -- ウィンドウの
+           どこをつかむとリサイズできるかを操作前から分かるようにする
+           （実際に要望された挙動）。リサイズ中はカーソルが縁から一時的に
+           外れても形状を維持する（Strategy_UpdateAllのUpdateResizeは
+           ドラッグ開始位置からの累積差分で動くため、途中でカーソルが
+           縁から外れても操作自体は継続する）。両軸を持つウィンドウは対象外
+           （従来通りウィンドウ全体で操作でき、専用カーソルも出さない）。 */
+        if (index >= 0)
+        {
+            GameWindowData *hitData = &g_windows[index];
+            int resizeX = HasCapability(hitData->capabilities, WC_RESIZE_X);
+            int resizeY = HasCapability(hitData->capabilities, WC_RESIZE_Y);
+            if ((resizeX || resizeY) && resizeX != resizeY)
+            {
+                int onEdge;
+                if (hitData->resizing)
+                {
+                    onEdge = 1;
+                }
+                else
+                {
+                    POINT cur;
+                    GetCursorPos(&cur);
+                    RECT full;
+                    GetWindowFullBounds(hwnd, &full);
+                    RECT edge = resizeX ? GetResizeEdgeZoneRight(full) : GetResizeEdgeZoneBottom(full);
+                    onEdge = PtInRect(&edge, cur);
+                }
+                if (onEdge)
+                {
+                    SetCursor(LoadCursorA(NULL, resizeX ? (LPCSTR)IDC_SIZEWE : (LPCSTR)IDC_SIZENS));
+                    return TRUE;
+                }
+            }
+        }
+        break;
     case WM_LBUTTONDOWN:
         if (index >= 0)
         {
@@ -1004,6 +1237,24 @@ static LRESULT CALLBACK GameWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
                 return 0;
             }
 #endif
+            /* 最小化ボタン(タイトルバー右上の小さな当たり判定)は、Movable/
+               Resizableと同時に持てるよう、ウィンドウ全体クリックでの最小化
+               トグルを廃止した代わりに新設したもの。この矩形内のクリックは
+               最小化トグルのみ行い、通常のドラッグ/リサイズ開始
+               (Strategy_HandleMouseDown)には進ませない。 */
+            if (HasCapability(g_windows[index].capabilities, WC_MINIMIZE))
+            {
+                POINT pt = {(int)(short)LOWORD(lParam), (int)(short)HIWORD(lParam)};
+                ClientToScreen(hwnd, &pt);
+                RECT fullBounds;
+                GetWindowFullBounds(hwnd, &fullBounds);
+                RECT btnRect = GetMinimizeButtonRect(fullBounds);
+                if (PtInRect(&btnRect, pt))
+                {
+                    SetWindowMinimized(index, !g_windows[index].minimized);
+                    return 0;
+                }
+            }
             ZOrder_BringToFront(hwnd);
             if (IsButtonWindowKind(g_windows[index].kind))
                 g_windows[index].OnClick();
@@ -1089,9 +1340,8 @@ static LRESULT CALLBACK GameWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
         int command = (int)(wParam & 0xFFF0);
         if (index >= 0)
         {
-            int isMinimizableKind = (g_windows[index].kind == WT_MINIMIZABLE ||
-                                      g_windows[index].kind == WT_MINIMIZABLE_NOENTRY);
-            if (command == SC_MINIMIZE && isMinimizableKind && !g_windows[index].minimized)
+            int canMinimize = HasCapability(g_windows[index].capabilities, WC_MINIMIZE);
+            if (command == SC_MINIMIZE && canMinimize && !g_windows[index].minimized)
                 SetWindowMinimized(index, 1);
             else if (command == SC_RESTORE && g_windows[index].minimized)
                 SetWindowMinimized(index, 0);
@@ -1127,14 +1377,15 @@ void ResetWindowRegistry(void)
     ZOrder_Reset();
 }
 
-int CreateGameWindowIndexed(HINSTANCE hInstance, WindowKind kind, int x, int y, int w, int h, const char *text)
+int CreateGameWindowIndexed(HINSTANCE hInstance, WindowKind kind, WindowCapabilities caps,
+                             int x, int y, int w, int h, const char *text)
 {
     if (g_windowCount >= MAX_WINDOWS)
         return -1;
 
     COLORREF bg, fg;
-    int solid, isNoEntry;
-    GetKindAppearance(kind, &bg, &fg, &solid, &isNoEntry);
+    int solid;
+    GetKindAppearance(kind, caps, &bg, &fg, &solid);
 
     DWORD style, exStyle;
     if (kind == WT_GOAL)
@@ -1235,7 +1486,7 @@ int CreateGameWindowIndexed(HINSTANCE hInstance, WindowKind kind, int x, int y, 
     data->bg = bg;
     data->fg = fg;
     data->solid = solid;
-    data->isNoEntry = isNoEntry;
+    data->capabilities = caps;
     data->parentIdx = -1;
     data->childCount = 0;
     data->logicalW = w;
@@ -1255,9 +1506,10 @@ int CreateGameWindowIndexed(HINSTANCE hInstance, WindowKind kind, int x, int y, 
     return index;
 }
 
-HWND CreateGameWindow(HINSTANCE hInstance, WindowKind kind, int x, int y, int w, int h, const char *text)
+HWND CreateGameWindow(HINSTANCE hInstance, WindowKind kind, WindowCapabilities caps,
+                      int x, int y, int w, int h, const char *text)
 {
-    int idx = CreateGameWindowIndexed(hInstance, kind, x, y, w, h, text);
+    int idx = CreateGameWindowIndexed(hInstance, kind, caps, x, y, w, h, text);
     return idx >= 0 ? g_windows[idx].hwnd : NULL;
 }
 

@@ -113,7 +113,7 @@ static void HandleDeletableInput(void)
        詰め直したりしないため、有効件数分の単純な前方走査で安全。 */
     for (int i = 0; i < g_windowCount; i++)
     {
-        if (g_windows[i].kind == WT_DELETABLE && g_windows[i].hwnd)
+        if (HasCapability(g_windows[i].capabilities, WC_DELETE) && g_windows[i].hwnd)
             DeleteWindow(i);
     }
 }

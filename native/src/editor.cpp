@@ -10,6 +10,7 @@
 #include "stage.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 int g_requestTest = 0;
 
@@ -57,6 +58,7 @@ static int g_pendingIndex = -1;
 typedef struct
 {
     WindowKind kind;
+    WindowCapabilities caps;
     const char *label;
     /* trueなら、このパレット項目は実際にはGameWindowを生成しない特殊項目
        （静的NoEntryZone、またはプレイヤー開始位置）。kindは見た目（背景色/
@@ -67,31 +69,47 @@ typedef struct
        位置を新しいプレイヤー開始位置として使う特殊項目（isPlayerStart、
        Editor_CommitPending参照）。 */
     int isPlayerStart;
+    /* trueなら、この項目は単体で仮置きにならない「能力パーツ」であることを
+       示す（isPart、Editor_EndPaletteDrag参照）。仮置き中のウィンドウに
+       重ねてドロップすると、そのcapsが仮置き先へOR結合される。 */
+    int isPart;
 } PaletteEntry;
 
-/* パレットに並べる配置候補。ボタン/キャンバス自身以外の
-   「実際にステージへ置きうる」全種別を網羅する（Goal、Title/Retryボタン、
-   静的NoEntryZone、プレイヤー開始位置も含む）。 */
+/* パレットに並べる配置候補。前半は「土台」（単体でドロップすると能力を
+   何も持たない仮置き状態になる）、後半は「能力パーツ」（仮置き中の
+   ウィンドウに重ねてドロップすることでcapabilitiesを1つずつ追加していく）。
+   以前は「Movable」「Resizable」のように土台と能力の組み合わせごとに項目を
+   用意していたが、コンポーネント化の趣旨（機能をパーツとして重ねて自由に
+   組み合わせる）に合わせ、土台と能力を完全に分離した。移動・リサイズ・
+   反転修飾はX/Y軸ごとに独立したパーツにしてあるため、例えば「Move X」と
+   「Resize Y」だけを重ねるといった軸ごとの組み合わせもそのまま試せる。 */
 static const PaletteEntry kPalette[] = {
-    {WT_NORMAL_BLACK, "Normal(Blk)"},
-    {WT_NORMAL_WHITE, "Normal(Wht)"},
-    {WT_TEXT_DISPLAY, "TextDisplay"},
-    {WT_MOVABLE, "Movable"},
-    {WT_RESIZABLE, "Resizable"},
-    {WT_DELETABLE, "Deletable"},
-    {WT_MINIMIZABLE, "Minimizable"},
-    {WT_UNCONSTRAINED, "Unconstrained"},
-    {WT_NORMAL_BLACK_NOENTRY, "Blk+NoEntry"},
-    {WT_NORMAL_WHITE_NOENTRY, "Wht+NoEntry"},
-    {WT_RESIZABLE_NOENTRY, "Resize+NoEntry"},
-    {WT_MOVABLE_NOENTRY, "Move+NoEntry"},
-    {WT_MINIMIZABLE_NOENTRY, "Mini+NoEntry"},
-    {WT_UNCONSTRAINED_NOENTRY, "Unc+NoEntry"},
-    {WT_GOAL, "Goal"},
-    {WT_BTN_TOTITLE, "Title Btn"},
-    {WT_BTN_RETRY, "Retry Btn"},
-    {WT_NORMAL_BLACK_NOENTRY, "NoEntry Zone", 1, 0},
-    {WT_MOVABLE, "Player", 0, 1},
+    /* 土台: 単体でドロップすると、能力を持たない仮置き状態になる。 */
+    {WT_NORMAL_BLACK, WC_NONE, "Normal(Blk)"},
+    {WT_NORMAL_WHITE, WC_NONE, "Normal(Wht)"},
+    {WT_TEXT_DISPLAY, WC_NONE, "TextDisplay"},
+    {WT_GOAL, WC_NONE, "Goal"},
+    {WT_BTN_TOTITLE, WC_NONE, "Title Btn"},
+    {WT_BTN_RETRY, WC_NONE, "Retry Btn"},
+    {WT_NORMAL_BLACK, WC_NONE, "NoEntry Zone", 1, 0, 0},
+    {WT_NORMAL_BLACK, WC_NONE, "Player", 0, 1, 0},
+    /* 能力パーツ: 仮置き中のウィンドウに重ねてドロップすると、その能力が
+       追加される（Zone/Playerの仮置きには効果なし）。 */
+    {WT_NORMAL_BLACK, WC_MOVE_X, "Move X", 0, 0, 1},
+    {WT_NORMAL_BLACK, WC_MOVE_Y, "Move Y", 0, 0, 1},
+    {WT_NORMAL_BLACK, WC_RESIZE_X, "Resize X", 0, 0, 1},
+    {WT_NORMAL_BLACK, WC_RESIZE_Y, "Resize Y", 0, 0, 1},
+    /* WC_RESIZE_FLIP_X/Yは対応するWC_RESIZE_X/Yが立っていて初めて意味を持つ
+       修飾フラグ（gamewindow.h参照）。Flipパーツ単体をResize X/Yパーツ抜きで
+       重ねただけでは何も起きない（マークも出ず、リサイズも一切できない）と
+       いう分かりにくい状態になってしまうため、Flipパーツ自体に対応する
+       Resizeビットを含めておき、単体で常に完結した能力になるようにする
+       （実際に報告された不具合）。 */
+    {WT_NORMAL_BLACK, (WindowCapabilities)(WC_RESIZE_X | WC_RESIZE_FLIP_X), "Flip X", 0, 0, 1},
+    {WT_NORMAL_BLACK, (WindowCapabilities)(WC_RESIZE_Y | WC_RESIZE_FLIP_Y), "Flip Y", 0, 0, 1},
+    {WT_NORMAL_BLACK, WC_MINIMIZE, "Minimize", 0, 0, 1},
+    {WT_NORMAL_BLACK, WC_DELETE, "Delete", 0, 0, 1},
+    {WT_NORMAL_BLACK, WC_NOENTRY, "NoEntry", 0, 0, 1},
 };
 #define PALETTE_COUNT (sizeof(kPalette) / sizeof(kPalette[0]))
 
@@ -129,14 +147,15 @@ void Editor_LoadTestStage(HINSTANCE hInstance)
         int x = PALETTE_X + col * (PALETTE_ICON_SIZE + PALETTE_GAP);
         int y = PALETTE_Y + row * (PALETTE_ICON_SIZE + PALETTE_GAP);
 
-        int idx = CreateGameWindowIndexed(hInstance, WT_BTN_PALETTE, x, y,
+        int idx = CreateGameWindowIndexed(hInstance, WT_BTN_PALETTE, WC_NONE, x, y,
                                            PALETTE_ICON_SIZE, PALETTE_ICON_SIZE, kPalette[i].label);
         if (idx >= 0)
         {
             g_windows[idx].paletteKind = kPalette[i].kind;
-            g_windows[idx].paletteIsNoEntry = WindowKind_IsNoEntry(kPalette[i].kind) || kPalette[i].isZone;
+            g_windows[idx].paletteCaps = kPalette[i].caps;
             g_windows[idx].paletteIsZone = kPalette[i].isZone;
             g_windows[idx].paletteIsPlayerStart = kPalette[i].isPlayerStart;
+            g_windows[idx].paletteIsPart = kPalette[i].isPart;
             g_windows[idx].paletteHomePos.x = x;
             g_windows[idx].paletteHomePos.y = y;
             g_windows[idx].paletteIconSize.cx = PALETTE_ICON_SIZE;
@@ -155,11 +174,11 @@ void Editor_LoadTestStage(HINSTANCE hInstance)
        ユーザーが配置したものではない」ことを明示しておく（そうしないと
        Export/Deleteの対象外判定がパレット由来のTitleボタンと区別できない）。 */
     int py = gridBottom + TOOLBAR_GAP;
-    int exportIdx = CreateGameWindowIndexed(hInstance, WT_BTN_EXPORT, PALETTE_X, py, TOOLBAR_BTN_W, TOOLBAR_BTN_H, "Export");
+    int exportIdx = CreateGameWindowIndexed(hInstance, WT_BTN_EXPORT, WC_NONE, PALETTE_X, py, TOOLBAR_BTN_W, TOOLBAR_BTN_H, "Export");
     py += TOOLBAR_BTN_H + TOOLBAR_GAP;
-    int resetIdx = CreateGameWindowIndexed(hInstance, WT_BTN_RESET, PALETTE_X, py, TOOLBAR_BTN_W, TOOLBAR_BTN_H, "Reset");
+    int resetIdx = CreateGameWindowIndexed(hInstance, WT_BTN_RESET, WC_NONE, PALETTE_X, py, TOOLBAR_BTN_W, TOOLBAR_BTN_H, "Reset");
     py += TOOLBAR_BTN_H + TOOLBAR_GAP;
-    int titleIdx = CreateGameWindowIndexed(hInstance, WT_BTN_TOTITLE, PALETTE_X, py, TOOLBAR_BTN_W, TOOLBAR_BTN_H, "Title");
+    int titleIdx = CreateGameWindowIndexed(hInstance, WT_BTN_TOTITLE, WC_NONE, PALETTE_X, py, TOOLBAR_BTN_W, TOOLBAR_BTN_H, "Title");
     py += TOOLBAR_BTN_H;
     if (exportIdx >= 0) g_windows[exportIdx].isEditorChrome = 1;
     if (resetIdx >= 0) g_windows[resetIdx].isEditorChrome = 1;
@@ -241,6 +260,7 @@ static void Editor_CommitPending(void)
     int isZone = d->paletteIsZone;
     int isPlayerStart = d->paletteIsPlayerStart;
     WindowKind kind = d->paletteKind;
+    WindowCapabilities caps = d->paletteCaps;
 
     DeleteWindow(committedIndex);
 
@@ -267,7 +287,7 @@ static void Editor_CommitPending(void)
     }
     else
     {
-        int newIdx = CreateGameWindowIndexed(g_hInstance, kind, x, y, w, h, DefaultDropText(kind));
+        int newIdx = CreateGameWindowIndexed(g_hInstance, kind, caps, x, y, w, h, DefaultDropText(kind));
         /* WindowMessageHandler.HandleLeftButtonUpと同じく、配置直後に一度だけ
            親子判定を行う -- そうしないとドラッグ&ドロップで置いたウィンドウは
            他のウィンドウの中に完全に収まっていても親子付けされず、その場で
@@ -287,16 +307,17 @@ static void Editor_CommitPending(void)
    新しいWT_BTN_PALETTEインスタンスとして存在するだけでよい。 */
 static void RespawnPaletteIcon(const GameWindowData *src)
 {
-    int idx = CreateGameWindowIndexed(g_hInstance, WT_BTN_PALETTE,
+    int idx = CreateGameWindowIndexed(g_hInstance, WT_BTN_PALETTE, WC_NONE,
                                        src->paletteHomePos.x, src->paletteHomePos.y,
                                        src->paletteIconSize.cx, src->paletteIconSize.cy,
                                        src->text);
     if (idx < 0)
         return;
     g_windows[idx].paletteKind = src->paletteKind;
-    g_windows[idx].paletteIsNoEntry = src->paletteIsNoEntry;
+    g_windows[idx].paletteCaps = src->paletteCaps;
     g_windows[idx].paletteIsZone = src->paletteIsZone;
     g_windows[idx].paletteIsPlayerStart = src->paletteIsPlayerStart;
+    g_windows[idx].paletteIsPart = src->paletteIsPart;
     g_windows[idx].paletteHomePos = src->paletteHomePos;
     g_windows[idx].paletteIconSize = src->paletteIconSize;
     g_windows[idx].isEditorChrome = 1;
@@ -332,9 +353,12 @@ void Editor_StartPaletteDrag(int index)
         return;
     }
 
-    /* 既に別のアイテムが配置待ちの状態で新しいアイコンのドラッグを始めた
-       場合、前のものを宙ぶらりんにせず自動的にその時点の大きさで確定する。 */
-    if (g_pendingIndex >= 0)
+    /* 既に別のアイテムが配置待ちの状態で新しい「土台」のドラッグを始めた
+       場合、前のものを宙ぶらりんにせず自動的にその時点の大きさで確定する。
+       「能力パーツ」のドラッグ開始ではこれを行わない -- パーツは仮置き中の
+       ウィンドウへ重ねて追加するためのものなので、ここで自動確定してしまうと
+       重ねる相手が消えてしまい本来の使い方ができなくなる。 */
+    if (g_pendingIndex >= 0 && !d->paletteIsPart)
         Editor_CommitPending();
 
     RespawnPaletteIcon(d);
@@ -344,8 +368,10 @@ void Editor_StartPaletteDrag(int index)
 
     /* ドラッグ中は「配置されるものそのもの」を実サイズで半透明表示する
        （小さなボタンのままカーソルに追従するのではなく）。この時点での
-       サイズはあくまで既定値 -- ドロップ後、角ドラッグで自由に調整できる。 */
-    SIZE size = DragFullSize(d->paletteKind, d->paletteIsPlayerStart);
+       サイズはあくまで既定値 -- ドロップ後、角ドラッグで自由に調整できる。
+       能力パーツは実体化する「もの」を持たないため、拡大せずパレット
+       アイコンそのままの小さいサイズでカーソルに追従させる。 */
+    SIZE size = d->paletteIsPart ? d->paletteIconSize : DragFullSize(d->paletteKind, d->paletteIsPlayerStart);
     POINT cur;
     GetCursorPos(&cur);
     SetWindowPos(d->hwnd, NULL, cur.x - size.cx / 2, cur.y - size.cy / 2, size.cx, size.cy,
@@ -395,7 +421,7 @@ void Editor_UpdatePaletteDrags(void)
         GameWindowData *d = &g_windows[i];
         if (d->kind != WT_BTN_PALETTE || !d->paletteDragging || !d->hwnd)
             continue;
-        SIZE size = DragFullSize(d->paletteKind, d->paletteIsPlayerStart);
+        SIZE size = d->paletteIsPart ? d->paletteIconSize : DragFullSize(d->paletteKind, d->paletteIsPlayerStart);
         POINT cur;
         GetCursorPos(&cur);
         SetWindowPos(d->hwnd, NULL, cur.x - size.cx / 2, cur.y - size.cy / 2, 0, 0,
@@ -431,6 +457,47 @@ void Editor_EndPaletteDrag(int index)
     d->paletteDragging = 0;
     ReleaseCapture();
 
+    if (d->paletteIsPart)
+    {
+        /* 能力パーツ: 単体では何も配置しない消費型の操作。その時点でカーソル
+           直下にあるウィンドウへ自身の能力ビットをOR結合する -- 対象は
+           仮置き中のアイテム（paletteCapsへ、Enterで確定するまで反映を
+           見た目だけ先取りする）と、既に確定済みの実ウィンドウ
+           （capabilitiesへ直接、その場で能力が有効になる）の両方を許す
+           （実際に要望された挙動: 仮置き中でなくても後から能力を追加
+           できるようにする）。WindowFromPointはZ-order的に最前面の
+           ウィンドウを返すため、重なっている場合は見えている方が対象になる。
+           カーソル直下に何も無い、パレット/ツールバー自身、Zone/PlayerStart
+           （どちらもGameWindowではないためそもそもヒットしない）の場合は
+           何も起きない -- いずれの場合もパーツ自身は常にホームポジションへ
+           戻る（土台と違い、パレット外に置いても仮置き状態にはならない）。 */
+        POINT cur;
+        GetCursorPos(&cur);
+        HWND hit = WindowFromPoint(cur);
+        int hitIndex = FindWindowIndex(hit);
+        if (hitIndex >= 0)
+        {
+            GameWindowData *target = &g_windows[hitIndex];
+            if (hitIndex == g_pendingIndex)
+            {
+                if (!target->paletteIsZone && !target->paletteIsPlayerStart)
+                {
+                    target->paletteCaps |= d->paletteCaps;
+                    InvalidateRect(target->hwnd, NULL, FALSE);
+                }
+            }
+            else if (!target->isEditorChrome && target->kind != WT_BTN_PALETTE)
+            {
+                target->capabilities |= d->paletteCaps;
+                InvalidateRect(target->hwnd, NULL, FALSE);
+            }
+        }
+        SetLayeredWindowAttributes(d->hwnd, 0, 255, LWA_ALPHA);
+        SetWindowPos(d->hwnd, NULL, d->paletteHomePos.x, d->paletteHomePos.y,
+                     d->paletteIconSize.cx, d->paletteIconSize.cy, SWP_NOZORDER | SWP_NOACTIVATE);
+        return;
+    }
+
     /* パレット+ツールバーの矩形の外に離されていれば、位置はそこに確定する。
        中で離された場合（ドラッグせず単に離した等）は配置キャンセル。 */
     POINT cur;
@@ -455,7 +522,10 @@ void Editor_EndPaletteDrag(int index)
 }
 
 /* WindowKindをそのままC識別子名の文字列にする。Editor_ExportStageの出力先
-   (stage_export.txt)がstage.cへそのまま貼り付け可能なコードになるように。 */
+   (stage_export.txt)がstage.cへそのまま貼り付け可能なコードになるように。
+   コンポーネント化により移動/リサイズ/最小化/削除/NoEntryはkindではなく
+   capabilitiesビットへ移ったため、ここで扱うのは残った「見た目の土台」
+   だけでよい。 */
 static const char *WindowKindName(WindowKind kind)
 {
     switch (kind)
@@ -463,22 +533,62 @@ static const char *WindowKindName(WindowKind kind)
     case WT_NORMAL_BLACK: return "WT_NORMAL_BLACK";
     case WT_NORMAL_WHITE: return "WT_NORMAL_WHITE";
     case WT_TEXT_DISPLAY: return "WT_TEXT_DISPLAY";
-    case WT_MOVABLE: return "WT_MOVABLE";
-    case WT_RESIZABLE: return "WT_RESIZABLE";
-    case WT_DELETABLE: return "WT_DELETABLE";
-    case WT_MINIMIZABLE: return "WT_MINIMIZABLE";
-    case WT_NORMAL_BLACK_NOENTRY: return "WT_NORMAL_BLACK_NOENTRY";
-    case WT_NORMAL_WHITE_NOENTRY: return "WT_NORMAL_WHITE_NOENTRY";
-    case WT_RESIZABLE_NOENTRY: return "WT_RESIZABLE_NOENTRY";
-    case WT_MOVABLE_NOENTRY: return "WT_MOVABLE_NOENTRY";
-    case WT_MINIMIZABLE_NOENTRY: return "WT_MINIMIZABLE_NOENTRY";
-    case WT_UNCONSTRAINED: return "WT_UNCONSTRAINED";
-    case WT_UNCONSTRAINED_NOENTRY: return "WT_UNCONSTRAINED_NOENTRY";
     case WT_GOAL: return "WT_GOAL";
     case WT_BTN_TOTITLE: return "WT_BTN_TOTITLE";
     case WT_BTN_RETRY: return "WT_BTN_RETRY";
     default: return "WT_NORMAL_BLACK";
     }
+}
+
+/* WindowCapabilitiesをstage.cへ貼り付け可能なC式の文字列にする
+   （stage.cのCreateGameWindow呼び出しで実際に使っている書式と揃える:
+   単一ビットはそのまま、複数ビットは`(WindowCapabilities)(A | B | ...)`）。
+   呼び出しごとに使い捨てるだけなので静的バッファ1個で足りる（同一呼び出し内で
+   2回目の呼び出し結果を保持する必要がないfprintf直前の使い方のみ）。 */
+static const char *CapsToExprString(WindowCapabilities caps)
+{
+    static char buf[256];
+    struct { WindowCapabilities bit; const char *name; } bits[] = {
+        {WC_MOVE_X, "WC_MOVE_X"},
+        {WC_MOVE_Y, "WC_MOVE_Y"},
+        {WC_RESIZE_X, "WC_RESIZE_X"},
+        {WC_RESIZE_Y, "WC_RESIZE_Y"},
+        {WC_RESIZE_FLIP_X, "WC_RESIZE_FLIP_X"},
+        {WC_RESIZE_FLIP_Y, "WC_RESIZE_FLIP_Y"},
+        {WC_MINIMIZE, "WC_MINIMIZE"},
+        {WC_DELETE, "WC_DELETE"},
+        {WC_NOENTRY, "WC_NOENTRY"},
+    };
+
+    if (caps == WC_NONE)
+    {
+        sprintf_s(buf, sizeof(buf), "WC_NONE");
+        return buf;
+    }
+
+    char names[9][32];
+    int count = 0;
+    for (size_t i = 0; i < sizeof(bits) / sizeof(bits[0]); i++)
+    {
+        if (HasCapability(caps, bits[i].bit))
+            sprintf_s(names[count++], sizeof(names[0]), "%s", bits[i].name);
+    }
+
+    if (count == 1)
+    {
+        sprintf_s(buf, sizeof(buf), "%s", names[0]);
+        return buf;
+    }
+
+    sprintf_s(buf, sizeof(buf), "(WindowCapabilities)(");
+    for (int i = 0; i < count; i++)
+    {
+        strcat_s(buf, sizeof(buf), names[i]);
+        if (i + 1 < count)
+            strcat_s(buf, sizeof(buf), " | ");
+    }
+    strcat_s(buf, sizeof(buf), ")");
+    return buf;
 }
 
 /* qsort comparator: sort g_windows[] indices by current Z-order (back to front). */
@@ -557,11 +667,11 @@ void Editor_ExportStage(void)
             fprintf(f, "        MakeGoal(h, %d, %d);\n", r.left, r.top);
         }
         else if (d->text[0] != '\0')
-            fprintf(f, "        CreateGameWindow(h, %s, %d, %d, %d, %d, \"%s\");\n",
-                    WindowKindName(d->kind), r.left, r.top, w, h, d->text);
+            fprintf(f, "        CreateGameWindow(h, %s, %s, %d, %d, %d, %d, \"%s\");\n",
+                    WindowKindName(d->kind), CapsToExprString(d->capabilities), r.left, r.top, w, h, d->text);
         else
-            fprintf(f, "        CreateGameWindow(h, %s, %d, %d, %d, %d, NULL);\n",
-                    WindowKindName(d->kind), r.left, r.top, w, h);
+            fprintf(f, "        CreateGameWindow(h, %s, %s, %d, %d, %d, %d, NULL);\n",
+                    WindowKindName(d->kind), CapsToExprString(d->capabilities), r.left, r.top, w, h);
     }
 
     /* 静的NoEntryZoneはg_windows[]の対象外(GameWindowではない)なので別途
