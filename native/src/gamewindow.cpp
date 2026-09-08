@@ -1428,8 +1428,8 @@ void SetWindowMinimized(int index, int minimized)
            実際に報告された不具合）。parentIdx/hwndの後始末（Player_OnMinimize
            が行う）はアニメーション完了時のまま据え置かれる。 */
         Player *p = Player_GetActive();
-        if (p && p->parentIdx >= 0 &&
-            (p->parentIdx == index || Hierarchy_IsDescendantOf(p->parentIdx, index)))
+        if (p && p->windowInteraction.parentIdx >= 0 &&
+            (p->windowInteraction.parentIdx == index || Hierarchy_IsDescendantOf(p->windowInteraction.parentIdx, index)))
         {
             Player_StartMinimizeAnim(p);
         }
@@ -1552,8 +1552,8 @@ void DeleteWindow(int index)
     Hierarchy_Detach(index);
 
     Player *p = Player_GetActive();
-    if (p && p->parentIdx == index)
-        p->parentIdx = -1;
+    if (p && p->windowInteraction.parentIdx == index)
+        p->windowInteraction.parentIdx = -1;
 
     HWND hwnd = data->hwnd;
     data->hwnd = NULL;

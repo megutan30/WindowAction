@@ -114,15 +114,15 @@ static int GatherObstacles(CollisionOptions opts, RECT *out, int maxOut)
         Player *p = Player_GetActive();
         /* 最小化中のプレイヤーはPlayer_GetBoundsが最小化直前の(凍結された)
            論理位置をそのまま返し続ける -- ShowWindow(SW_MINIMIZE)される
-           実HWNDの矩形ではなくp->x/y/width/heightを見ているため、実際の
-           見た目としてはタスクバーへ隠れているにもかかわらず、その元の
-           位置に幽霊のような当たり判定が残り続けてしまっていた（実際に
+           実HWNDの矩形ではなくp->physics.x/y/width/heightを見ているため、
+           実際の見た目としてはタスクバーへ隠れているにもかかわらず、その
+           元の位置に幽霊のような当たり判定が残り続けてしまっていた（実際に
            報告された不具合: 不可侵ウィンドウを動かすと最小化中のプレイヤー
            にぶつかる）。他の種別のウィンドウを最小化時に障害物から除外する
            のと同じく、最小化中はここでも除外する。 */
-        if (p && !p->isMinimized &&
-            !(opts.excludeIndex >= 0 && p->parentIdx >= 0 &&
-              Hierarchy_ChainContains(p->parentIdx, opts.excludeIndex)))
+        if (p && !p->windowInteraction.isMinimized &&
+            !(opts.excludeIndex >= 0 && p->windowInteraction.parentIdx >= 0 &&
+              Hierarchy_ChainContains(p->windowInteraction.parentIdx, opts.excludeIndex)))
         {
             RECT pb;
             Player_GetBounds(p, &pb);

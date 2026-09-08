@@ -4,9 +4,28 @@
 #include <windows.h>
 #include "animation.h"
 
-typedef struct {
+/* C++移行フェーズ4: 元のC#版(PlayerPhysics.cs/PlayerWindowInteraction.cs/
+   PlayerInputHandler.cs/PlayerStateMachine.cs)と同じ4つの関心事に分割する。
+   ネイティブ移植の初期段階ではこれらを全部Player構造体に平坦化していたが、
+   今回のC++移行でC#版と同じ構成に戻す。外部ファイル(collision.cpp/
+   editor.cpp/gamewindow.cpp/hierarchy.cpp)からの直接フィールドアクセスは
+   事前調査でparentIdx/isMinimized/inheritedFlipX/Yの3種類しか無いことを
+   確認済みで、GameWindowDataも同名のparentIdxフィールドを持つため、
+   移行時にはp->parentIdxのような呼び出し元テキストを機械的に置換するのでは
+   なく、変数がPlayer*であることを個別に確認しながら移した
+   （GameWindowDataのparentIdx/hwndとの取り違えを防ぐため）。 */
+
+struct PlayerPhysics
+{
     float x, y;   /* 左上座標、スクリーン座標系（滑らかな物理演算のためfloat） */
     int width, height; /* 現在のサイズ -- 可変: リサイズされる親に合わせてスケーリングされる */
+    float vy;
+    int grounded;
+    int facingRight;
+};
+
+struct PlayerWindowInteraction
+{
     /* Player_ApplyParentRelativeTransform専用: 直近にこの関数を適用した時点の
        親の可視矩形。サイズ・位置ともに、ジェスチャー開始時点ではなくこちらを
        フレームごとの基準にする -- そうしないと、(1)リサイズ中にプレイヤー
@@ -25,9 +44,6 @@ typedef struct {
        この親に入った）のみ、現在の矩形をその場で新しい基準として確立し
        直す（Player_ApplyParentRelativeTransform参照）。 */
     int lastAppliedParentIdx;
-    float vy;
-    int grounded;
-    int facingRight;
     int parentIdx; /* -1 = どのウィンドウの内部にもいない（C#のPlayerForm.Parentに対応） */
     int isMinimized; /* フリーズ状態: 親だったウィンドウが最小化された */
     int lastValidParentIdx; /* Player_OnRestore のために記憶しておく、lastValidParent に対応 */
@@ -38,9 +54,15 @@ typedef struct {
        見た目のミラー描画だけでなく、重力とジャンプの向きの反転にも使う
        （上下逆さの床/天井の上に立つ）。inheritedFlipXは見た目のみ。 */
     int inheritedFlipX, inheritedFlipY;
-    /* 最小化の縮小アニメーション状態(GameWindowData.minimizeAnimState等と
-       同じ仕組み)。0=無し、1=縮小中。Player_StartMinimizeAnim/
-       Player_UpdateMinimizeAnim参照。 */
+};
+
+/* 最小化の縮小・拡大アニメーション状態(GameWindowData.minimizeAnimState等と
+   同じ仕組み)。0=無し、1=縮小中、2=復元中。Player_StartMinimizeAnim/
+   Player_UpdateMinimizeAnim参照。C#版に「アニメーション」専用のクラスは
+   無いが、PlayerStateMachineとは別の関心事(見た目のトランジションであり
+   ゲームプレイ状態ではない)のため独立させている。 */
+struct PlayerMinimizeAnim
+{
     int minimizeAnimState;
     float minimizeAnimT;
     RECT minimizeAnimFrom;
@@ -50,6 +72,39 @@ typedef struct {
        タスクバーサムネイル/ライブプレビュー用（PlayerWindowProcの
        WM_DWMSENDICONICTHUMBNAIL/WM_DWMSENDICONICLIVEPREVIEWBITMAP参照）。 */
     HBITMAP iconicBitmap;
+};
+
+/* PlayerInputHandler.cs相当。キーボード状態を毎回読み直すだけでフィールドを
+   一切持たない(C#版も同様にステートレス)。 */
+struct PlayerInputHandler
+{
+    bool ShouldJump() const;
+    bool IsMovingLeft() const;
+    bool IsMovingRight() const;
+};
+
+/* PlayerStateMachine.cs相当。ネイティブ移植はStateを専用フィールドとして
+   保持せず、必要な箇所でvy/groundedから都度導出する設計を最初から採って
+   いたため、ここでも新しいフィールドは追加せず、導出ロジックだけを
+   ひとまとめにする。 */
+struct PlayerStateMachine
+{
+    enum class State
+    {
+        Normal,
+        Jumping,
+        Falling,
+        Grounded
+    };
+    static State GetState(float vy, int grounded);
+};
+
+typedef struct {
+    PlayerPhysics physics;
+    PlayerWindowInteraction windowInteraction;
+    PlayerMinimizeAnim minimizeAnim;
+    PlayerInputHandler inputHandler;
+    PlayerStateMachine stateMachine;
     HWND hwnd;
     PlayerAnimation anim;
 } Player;

@@ -258,7 +258,7 @@ static void ApplyScaleToSpecialChildren(int rootIndex, RECT oldRect, RECT newRec
                                          int minSize, int maxSize)
 {
     Player *p = Player_GetActive();
-    if (p && p->parentIdx == rootIndex)
+    if (p && p->windowInteraction.parentIdx == rootIndex)
         Player_ApplyParentRelativeTransform(p, rootIndex, newRect);
     ApplyScaleToGoalIfParented(rootIndex, oldRect, newRect, scaleX, scaleY, minSize, maxSize);
     ApplyScaleToButtonsIfParented(rootIndex, oldRect, newRect, scaleX, scaleY, minSize, maxSize);
@@ -351,12 +351,12 @@ void Hierarchy_ToggleInheritedFlip(int rootIndex, int toggleX, int toggleY)
        ここで別途XORすると二重反転で相殺されてしまう（実際に発生していた
        不具合）。 */
     Player *p = Player_GetActive();
-    if (p && p->parentIdx == rootIndex)
+    if (p && p->windowInteraction.parentIdx == rootIndex)
     {
         if (toggleX)
-            p->inheritedFlipX ^= 1;
+            p->windowInteraction.inheritedFlipX ^= 1;
         if (toggleY)
-            p->inheritedFlipY ^= 1;
+            p->windowInteraction.inheritedFlipY ^= 1;
     }
 
     for (int i = 0; i < root->childCount; i++)
@@ -476,7 +476,7 @@ void Hierarchy_MirrorDirectChildren(int rootIndex, RECT rootBounds, int mirrorX,
         return;
 
     Player *p = Player_GetActive();
-    if (p && p->parentIdx == rootIndex)
+    if (p && p->windowInteraction.parentIdx == rootIndex)
         Player_MirrorWithinParent(p, rootIndex, rootBounds, mirrorX, mirrorY);
 
     int goalIdx = FindGoalIndex();
@@ -666,7 +666,7 @@ void Hierarchy_MinimizeSubtree(int index)
        ここで別途処理する必要はない（プレイヤーだけはHierarchy_Attachが一切
        呼ばれずparentIdxのみで追跡されるため、この個別チェックが必要）。 */
     Player *p = Player_GetActive();
-    if (p && p->parentIdx == index)
+    if (p && p->windowInteraction.parentIdx == index)
         Player_OnMinimize(p);
 }
 

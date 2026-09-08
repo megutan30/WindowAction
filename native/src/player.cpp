@@ -37,6 +37,37 @@ static int IsValidMove(RECT bounds, int parentIdx);
 static const char *kPlayerWindowClass = "WA_Player";
 static Player *g_activePlayer = NULL;
 
+/* PlayerInputHandler.cs相当。以前はPlayer_Update内に直接書かれていた
+   GetAsyncKeyStateの呼び出しをそのまま移しただけで、キー割り当て・判定
+   ロジックは変更していない。 */
+bool PlayerInputHandler::IsMovingLeft() const
+{
+    return (GetAsyncKeyState('A') & 0x8000) || (GetAsyncKeyState(VK_LEFT) & 0x8000);
+}
+
+bool PlayerInputHandler::IsMovingRight() const
+{
+    return (GetAsyncKeyState('D') & 0x8000) || (GetAsyncKeyState(VK_RIGHT) & 0x8000);
+}
+
+bool PlayerInputHandler::ShouldJump() const
+{
+    return (GetAsyncKeyState(VK_SPACE) & 0x8000) || (GetAsyncKeyState(VK_UP) & 0x8000) || (GetAsyncKeyState('W') & 0x8000);
+}
+
+/* PlayerStateMachine.cs相当。ネイティブ移植はStateを専用フィールドとして
+   保持しないため、呼び出し側が必要なときにvy/groundedから導出する。
+   PlayerStateMachine.UpdateStateと同じ優先順位: 上昇中(vy<0)ならJumping、
+   接地していなければFalling、それ以外はGrounded。 */
+PlayerStateMachine::State PlayerStateMachine::GetState(float vy, int grounded)
+{
+    if (vy < 0.0f)
+        return State::Jumping;
+    if (!grounded)
+        return State::Falling;
+    return State::Grounded;
+}
+
 static int RectsOverlap(RECT a, RECT b) { return WindowQuery_RectsOverlap(a, b); }
 
 #define MAX_INTERSECTING 64
@@ -91,14 +122,14 @@ static void OffsetR(RECT *r, int dx, int dy)
    名目上60x60のヒットボックスの外側までクリップされずに描画できる余地が
    生まれる -- これがないと、アニメーションする本体とそのアウトラインが
    衝突ボックスちょうどに窮屈に収められ、意図した形状と目に見えて食い違って
-   しまう。p->x/y/width/heightは常に論理的な衝突ボックスを保持し、実際の
+   しまう。p->physics.x/y/width/heightは常に論理的な衝突ボックスを保持し、実際の
    HWND矩形だけが2倍になる。 */
 static void GetPlayerDisplayRect(const Player *p, int *dx, int *dy, int *dw, int *dh)
 {
-    *dw = p->width * 2;
-    *dh = p->height * 2;
-    *dx = (int)p->x - p->width / 2;
-    *dy = (int)p->y - p->height / 2;
+    *dw = p->physics.width * 2;
+    *dh = p->physics.height * 2;
+    *dx = (int)p->physics.x - p->physics.width / 2;
+    *dy = (int)p->physics.y - p->physics.height / 2;
 }
 
 /* ---- 描画（変更なし） ---- */
@@ -131,8 +162,8 @@ static void PaintPlayer(HWND hwnd)
     {
         scaleX = g_activePlayer->anim.scaleX;
         scaleY = g_activePlayer->anim.scaleY;
-        logicalW = g_activePlayer->width;
-        logicalH = g_activePlayer->height;
+        logicalW = g_activePlayer->physics.width;
+        logicalH = g_activePlayer->physics.height;
     }
     float marginX = (float)(rc.right - rc.left - logicalW) / 2.0f;
     float marginY = (float)(rc.bottom - rc.top - logicalH) / 2.0f;
@@ -162,15 +193,15 @@ static void PaintPlayer(HWND hwnd)
         ScopedSelectObject selectEyeBrush(memDC, eyeBrush);
         float eyeY = bottomY - visualH * 0.6f;
         float eyeOffset = visualW * 0.2f;
-        float eyeX = (g_activePlayer && g_activePlayer->facingRight) ? (centerX + eyeOffset) : (centerX - eyeOffset);
+        float eyeX = (g_activePlayer && g_activePlayer->physics.facingRight) ? (centerX + eyeOffset) : (centerX - eyeOffset);
         Ellipse(memDC, (int)eyeX - 4, (int)eyeY - 4, (int)eyeX + 4, (int)eyeY + 4);
     }
 
     /* PlayerForm.OnPaintは、本体自身の固定色ボーダーの上に重ねて、親の色に
        基づく追加のアウトラインを描画する。 */
-    if (g_activePlayer && g_activePlayer->parentIdx >= 0)
+    if (g_activePlayer && g_activePlayer->windowInteraction.parentIdx >= 0)
     {
-        GameWindowData *parent = GetWindowData(g_activePlayer->parentIdx);
+        GameWindowData *parent = GetWindowData(g_activePlayer->windowInteraction.parentIdx);
         if (parent)
         {
             COLORREF outline = CalculateOutlineColor(parent->bg);
@@ -185,8 +216,8 @@ static void PaintPlayer(HWND hwnd)
        乗っている(乗っていた)祖先が反転した回数のパリティをinheritedFlipX/Yに
        永続的に積算しており、それに応じて描画内容だけをStretchBltの負幅/
        負高さでミラーする。実HWNDの矩形自体は変えない(見た目だけの効果)。 */
-    int flipX = g_activePlayer && g_activePlayer->inheritedFlipX;
-    int flipY = g_activePlayer && g_activePlayer->inheritedFlipY;
+    int flipX = g_activePlayer && g_activePlayer->windowInteraction.inheritedFlipX;
+    int flipY = g_activePlayer && g_activePlayer->windowInteraction.inheritedFlipY;
     int fullW2 = rc.right - rc.left;
     int fullH2 = rc.bottom - rc.top;
     if (flipX || flipY)
@@ -238,10 +269,10 @@ static HBITMAP CreatePlayerArgbDibSection(HDC referenceDC, int w, int h, void **
    プレイヤー本体だけが正しく切り抜かれたサムネイルになる。 */
 static void CapturePlayerIconicBitmap(Player *p)
 {
-    if (p->iconicBitmap)
+    if (p->minimizeAnim.iconicBitmap)
     {
-        DeleteObject(p->iconicBitmap);
-        p->iconicBitmap = NULL;
+        DeleteObject(p->minimizeAnim.iconicBitmap);
+        p->minimizeAnim.iconicBitmap = NULL;
     }
 
     RECT rc;
@@ -276,7 +307,7 @@ static void CapturePlayerIconicBitmap(Player *p)
         px[i * 4 + 3] = (unsigned char)(isMagenta ? 0 : 255);
     }
 
-    p->iconicBitmap = bmp;
+    p->minimizeAnim.iconicBitmap = bmp;
 }
 
 /* CapturePlayerIconicBitmap/RespondPlayerIconicThumbnail/
@@ -334,11 +365,11 @@ static HBITMAP CopyPlayerBitmapScaled(HBITMAP src, int srcW, int srcH, int dstW,
    保ったまま縮小する。 */
 static void RespondPlayerIconicThumbnail(Player *p, int reqW, int reqH)
 {
-    if (!p->iconicBitmap || reqW <= 0 || reqH <= 0)
+    if (!p->minimizeAnim.iconicBitmap || reqW <= 0 || reqH <= 0)
         return;
 
     BITMAP bmInfo;
-    if (!GetObject(p->iconicBitmap, sizeof(bmInfo), &bmInfo) ||
+    if (!GetObject(p->minimizeAnim.iconicBitmap, sizeof(bmInfo), &bmInfo) ||
         bmInfo.bmWidth <= 0 || bmInfo.bmHeight <= 0)
         return;
 
@@ -352,7 +383,7 @@ static void RespondPlayerIconicThumbnail(Player *p, int reqW, int reqH)
     if (dstH < 1)
         dstH = 1;
 
-    HBITMAP scaled = CopyPlayerBitmapScaled(p->iconicBitmap, bmInfo.bmWidth, bmInfo.bmHeight, dstW, dstH);
+    HBITMAP scaled = CopyPlayerBitmapScaled(p->minimizeAnim.iconicBitmap, bmInfo.bmWidth, bmInfo.bmHeight, dstW, dstH);
     if (scaled)
         DwmSetIconicThumbnail(p->hwnd, scaled, 0);
 }
@@ -361,15 +392,15 @@ static void RespondPlayerIconicThumbnail(Player *p, int reqW, int reqH)
    時のAero Peekの大きなプレビュー。原寸大のキャプチャをそのまま渡す。 */
 static void RespondPlayerIconicLivePreview(Player *p)
 {
-    if (!p->iconicBitmap)
+    if (!p->minimizeAnim.iconicBitmap)
         return;
 
     BITMAP bmInfo;
-    if (!GetObject(p->iconicBitmap, sizeof(bmInfo), &bmInfo) ||
+    if (!GetObject(p->minimizeAnim.iconicBitmap, sizeof(bmInfo), &bmInfo) ||
         bmInfo.bmWidth <= 0 || bmInfo.bmHeight <= 0)
         return;
 
-    HBITMAP copy = CopyPlayerBitmapScaled(p->iconicBitmap, bmInfo.bmWidth, bmInfo.bmHeight, bmInfo.bmWidth, bmInfo.bmHeight);
+    HBITMAP copy = CopyPlayerBitmapScaled(p->minimizeAnim.iconicBitmap, bmInfo.bmWidth, bmInfo.bmHeight, bmInfo.bmWidth, bmInfo.bmHeight);
     if (copy)
         DwmSetIconicLivePreviewBitmap(p->hwnd, copy, NULL, 0);
 }
@@ -455,21 +486,21 @@ void RegisterPlayerWindowClass(HINSTANCE hInstance)
 
 HWND CreatePlayerWindow(HINSTANCE hInstance, Player *p, int startX, int startY)
 {
-    p->x = (float)startX;
-    p->y = (float)startY;
-    p->width = PLAYER_SIZE;
-    p->height = PLAYER_SIZE;
-    p->lastAppliedParentIdx = -1;
-    p->vy = 0.0f;
-    p->grounded = 0;
-    p->facingRight = 1;
-    p->parentIdx = -1;
-    p->isMinimized = 0;
-    p->lastValidParentIdx = -1;
-    p->inheritedFlipX = 0;
-    p->inheritedFlipY = 0;
-    p->minimizeAnimState = 0;
-    p->iconicBitmap = NULL;
+    p->physics.x = (float)startX;
+    p->physics.y = (float)startY;
+    p->physics.width = PLAYER_SIZE;
+    p->physics.height = PLAYER_SIZE;
+    p->windowInteraction.lastAppliedParentIdx = -1;
+    p->physics.vy = 0.0f;
+    p->physics.grounded = 0;
+    p->physics.facingRight = 1;
+    p->windowInteraction.parentIdx = -1;
+    p->windowInteraction.isMinimized = 0;
+    p->windowInteraction.lastValidParentIdx = -1;
+    p->windowInteraction.inheritedFlipX = 0;
+    p->windowInteraction.inheritedFlipY = 0;
+    p->minimizeAnim.minimizeAnimState = 0;
+    p->minimizeAnim.iconicBitmap = NULL;
     Anim_Init(&p->anim);
 
     int dx, dy, dw, dh;
@@ -524,30 +555,30 @@ void Player_AssignInitialParent(Player *p)
             }
         }
     }
-    p->parentIdx = bestIdx;
+    p->windowInteraction.parentIdx = bestIdx;
 }
 
 void Player_Reset(Player *p, int startX, int startY)
 {
-    p->x = (float)startX;
-    p->y = (float)startY;
-    p->width = PLAYER_SIZE;
-    p->height = PLAYER_SIZE;
-    p->lastAppliedParentIdx = -1;
-    p->vy = 0.0f;
-    p->grounded = 0;
-    p->parentIdx = -1;
-    p->isMinimized = 0;
-    p->lastValidParentIdx = -1;
-    p->inheritedFlipX = 0;
-    p->inheritedFlipY = 0;
-    p->minimizeAnimState = 0;
+    p->physics.x = (float)startX;
+    p->physics.y = (float)startY;
+    p->physics.width = PLAYER_SIZE;
+    p->physics.height = PLAYER_SIZE;
+    p->windowInteraction.lastAppliedParentIdx = -1;
+    p->physics.vy = 0.0f;
+    p->physics.grounded = 0;
+    p->windowInteraction.parentIdx = -1;
+    p->windowInteraction.isMinimized = 0;
+    p->windowInteraction.lastValidParentIdx = -1;
+    p->windowInteraction.inheritedFlipX = 0;
+    p->windowInteraction.inheritedFlipY = 0;
+    p->minimizeAnim.minimizeAnimState = 0;
     /* 最小化アニメーションの途中でステージがリセットされた場合に備え、
        上書きする前に解放する（GDIリソースリークの防止）。 */
-    if (p->iconicBitmap)
+    if (p->minimizeAnim.iconicBitmap)
     {
-        DeleteObject(p->iconicBitmap);
-        p->iconicBitmap = NULL;
+        DeleteObject(p->minimizeAnim.iconicBitmap);
+        p->minimizeAnim.iconicBitmap = NULL;
     }
     Anim_Init(&p->anim);
     if (p->hwnd)
@@ -561,24 +592,24 @@ void Player_Reset(Player *p, int startX, int startY)
 
 void Player_GetBounds(const Player *p, RECT *out)
 {
-    out->left = (LONG)p->x;
-    out->top = (LONG)p->y;
-    out->right = (LONG)p->x + p->width;
-    out->bottom = (LONG)p->y + p->height;
+    out->left = (LONG)p->physics.x;
+    out->top = (LONG)p->physics.y;
+    out->right = (LONG)p->physics.x + p->physics.width;
+    out->bottom = (LONG)p->physics.y + p->physics.height;
 }
 
 void Player_FollowParentMove(Player *p, int parentIdx, int dx, int dy)
 {
-    if (p->parentIdx < 0 || (dx == 0 && dy == 0))
+    if (p->windowInteraction.parentIdx < 0 || (dx == 0 && dy == 0))
         return;
-    int idx = p->parentIdx;
+    int idx = p->windowInteraction.parentIdx;
     int guard = 0;
     while (idx >= 0 && guard++ < MAX_WINDOWS)
     {
         if (idx == parentIdx)
         {
-            p->x += (float)dx;
-            p->y += (float)dy;
+            p->physics.x += (float)dx;
+            p->physics.y += (float)dy;
             return;
         }
         idx = g_windows[idx].parentIdx;
@@ -592,7 +623,7 @@ static int PlayerRoundToNearest(float v)
 
 void Player_ApplyParentRelativeTransform(Player *p, int windowIndex, RECT newRect)
 {
-    if (p->parentIdx != windowIndex)
+    if (p->windowInteraction.parentIdx != windowIndex)
         return;
 
     /* lastAppliedParentRectがまだこのwindowIndexについて確立されていない
@@ -632,10 +663,10 @@ void Player_ApplyParentRelativeTransform(Player *p, int windowIndex, RECT newRec
        プレイヤーがすり抜ける）。lastAppliedParentRectは同じ部屋にいる限り
        常に最新の状態に更新され続けるため、世代をまたいでもそのまま基準
        として使い続けて問題ない。 */
-    if (p->lastAppliedParentIdx != windowIndex)
+    if (p->windowInteraction.lastAppliedParentIdx != windowIndex)
     {
-        p->lastAppliedParentIdx = windowIndex;
-        p->lastAppliedParentRect = newRect;
+        p->windowInteraction.lastAppliedParentIdx = windowIndex;
+        p->windowInteraction.lastAppliedParentRect = newRect;
 
         /* HandleWindowTransitionsが親をwindowIndexへ切り替えるのはこの関数の
            呼び出しより後（Strategy_UpdateAllの中でこの関数が呼ばれた時点では
@@ -651,12 +682,12 @@ void Player_ApplyParentRelativeTransform(Player *p, int windowIndex, RECT newRec
            すり抜けてしまう（実際に報告された不具合）。スケール追従はまだ
            適用しない（それは次のフレーム以降）が、位置だけは親の現在の
            矩形の内側へクランプしておくことで、この連鎖を断ち切る。 */
-        int clampW = p->width;
-        int clampH = p->height;
+        int clampW = p->physics.width;
+        int clampH = p->physics.height;
         int maxX = newRect.right - clampW;
         int maxY = newRect.bottom - clampH;
-        int clampedX = (int)p->x;
-        int clampedY = (int)p->y;
+        int clampedX = (int)p->physics.x;
+        int clampedY = (int)p->physics.y;
         if (clampedX < newRect.left)
             clampedX = newRect.left;
         if (clampedX > maxX)
@@ -665,16 +696,16 @@ void Player_ApplyParentRelativeTransform(Player *p, int windowIndex, RECT newRec
             clampedY = newRect.top;
         if (clampedY > maxY)
             clampedY = maxY;
-        p->x = (float)clampedX;
-        p->y = (float)clampedY;
+        p->physics.x = (float)clampedX;
+        p->physics.y = (float)clampedY;
         return;
     }
 
-    int lastW = p->lastAppliedParentRect.right - p->lastAppliedParentRect.left;
-    int lastH = p->lastAppliedParentRect.bottom - p->lastAppliedParentRect.top;
+    int lastW = p->windowInteraction.lastAppliedParentRect.right - p->windowInteraction.lastAppliedParentRect.left;
+    int lastH = p->windowInteraction.lastAppliedParentRect.bottom - p->windowInteraction.lastAppliedParentRect.top;
     if (lastW <= 0 || lastH <= 0)
     {
-        p->lastAppliedParentRect = newRect;
+        p->windowInteraction.lastAppliedParentRect = newRect;
         return;
     }
 
@@ -694,21 +725,21 @@ void Player_ApplyParentRelativeTransform(Player *p, int windowIndex, RECT newRec
        プレイヤーが元の大きさに戻らずわずかに小さいまま、という形で顕在化
        する（実際に報告された不具合）。位置の計算と同じPlayerRoundToNearest
        （四捨五入）を使うことで、丸めの偏りを無くし蓄積誤差を防ぐ。 */
-    int newW = PlayerRoundToNearest((float)p->width * stepScaleX);
-    int newH = PlayerRoundToNearest((float)p->height * stepScaleY);
+    int newW = PlayerRoundToNearest((float)p->physics.width * stepScaleX);
+    int newH = PlayerRoundToNearest((float)p->physics.height * stepScaleY);
     if (newW < PLAYER_MIN_SIZE)
         newW = PLAYER_MIN_SIZE;
     if (newH < PLAYER_MIN_SIZE)
         newH = PLAYER_MIN_SIZE;
 
-    int newX = newRect.left + PlayerRoundToNearest((float)((int)p->x - p->lastAppliedParentRect.left) * stepScaleX);
-    int newY = newRect.top + PlayerRoundToNearest((float)((int)p->y - p->lastAppliedParentRect.top) * stepScaleY);
+    int newX = newRect.left + PlayerRoundToNearest((float)((int)p->physics.x - p->windowInteraction.lastAppliedParentRect.left) * stepScaleX);
+    int newY = newRect.top + PlayerRoundToNearest((float)((int)p->physics.y - p->windowInteraction.lastAppliedParentRect.top) * stepScaleY);
 
-    p->lastAppliedParentRect = newRect;
-    p->width = newW;
-    p->height = newH;
-    p->x = (float)newX;
-    p->y = (float)newY;
+    p->windowInteraction.lastAppliedParentRect = newRect;
+    p->physics.width = newW;
+    p->physics.height = newH;
+    p->physics.x = (float)newX;
+    p->physics.y = (float)newY;
 
     /* AdjustPositionAfterResize: 新しい境界が親自身の境界に収まらなくなった
        場合、位置をその中にクランプし直す（C#側のフォールバックに合わせ、
@@ -731,8 +762,8 @@ void Player_ApplyParentRelativeTransform(Player *p, int windowIndex, RECT newRec
             clampedY = parentBounds.top;
         if (clampedY > maxY)
             clampedY = maxY;
-        p->x = (float)clampedX;
-        p->y = (float)clampedY;
+        p->physics.x = (float)clampedX;
+        p->physics.y = (float)clampedY;
     }
 
     if (p->hwnd)
@@ -769,21 +800,21 @@ void Player_ApplyParentRelativeTransform(Player *p, int windowIndex, RECT newRec
    位置を該当する軸について正しく鏡映する。 */
 void Player_MirrorWithinParent(Player *p, int windowIndex, RECT parentBounds, int mirrorX, int mirrorY)
 {
-    if (p->parentIdx != windowIndex || (!mirrorX && !mirrorY))
+    if (p->windowInteraction.parentIdx != windowIndex || (!mirrorX && !mirrorY))
         return;
 
     RECT pb;
     Player_GetBounds(p, &pb);
     if (mirrorX)
-        p->x = (float)(parentBounds.left + parentBounds.right - pb.right);
+        p->physics.x = (float)(parentBounds.left + parentBounds.right - pb.right);
     if (mirrorY)
-        p->y = (float)(parentBounds.top + parentBounds.bottom - pb.bottom);
+        p->physics.y = (float)(parentBounds.top + parentBounds.bottom - pb.bottom);
 
     /* 次フレームのPlayer_ApplyParentRelativeTransformが、この鏡映による
        ジャンプを「歩行による移動」と誤認して差分適用してしまわないよう、
        追従の基準もこの時点の親矩形に更新しておく。 */
-    p->lastAppliedParentRect = parentBounds;
-    p->lastAppliedParentIdx = windowIndex;
+    p->windowInteraction.lastAppliedParentRect = parentBounds;
+    p->windowInteraction.lastAppliedParentIdx = windowIndex;
 
     if (p->hwnd)
     {
@@ -803,7 +834,7 @@ static int SignOf(float v) { return v > 0 ? 1 : (v < 0 ? -1 : 0); }
    ウィンドウが上下反転した状態)。inheritedFlipYはHierarchy_ToggleInheritedFlip
    により、実際に祖先が反転した瞬間だけXORで積算される永続フラグなので、
    親から離れても向きはそのまま保たれる。 */
-static int GravDir(const Player *p) { return p->inheritedFlipY ? -1 : 1; }
+static int GravDir(const Player *p) { return p->windowInteraction.inheritedFlipY ? -1 : 1; }
 
 static void CheckHorizontalCollision(RECT bounds, float *moveX)
 {
@@ -1236,12 +1267,12 @@ static RECT HandleDesktopIconCollisions(RECT proposed, RECT current, int *hitCei
 
 static void HandleWindowTransitions(Player *p, RECT newBounds)
 {
-    if (p->parentIdx < 0)
+    if (p->windowInteraction.parentIdx < 0)
     {
         int covering = WindowQuery_GetFullyContaining(newBounds);
         if (covering >= 0)
         {
-            p->parentIdx = covering;
+            p->windowInteraction.parentIdx = covering;
             /* Player_ApplyParentRelativeTransformが使うlastAppliedParentIdx/
                lastAppliedParentRectは「今の親に連続して居続けている間だけ」
                有効な基準 -- 親が変わった（今回のように新しく入った）瞬間に
@@ -1253,7 +1284,7 @@ static void HandleWindowTransitions(Player *p, RECT newBounds)
                適用してしまい、サイズが一気にジャンプする不具合があった
                （実際に報告された不具合: 他のウィンドウからリサイズ中の
                ウィンドウに入ると急激に大きさが変わる）。 */
-            p->lastAppliedParentIdx = -1;
+            p->windowInteraction.lastAppliedParentIdx = -1;
         }
     }
     else
@@ -1267,20 +1298,20 @@ static void HandleWindowTransitions(Player *p, RECT newBounds)
            （実際に報告された不具合）。アニメーション中は再判定自体をスキップし、
            Hierarchy_MinimizeSubtreeが正しくこのウィンドウを親として見つけて
            Player_OnMinimizeを呼べるようにする。 */
-        GameWindowData *curParent = GetWindowData(p->parentIdx);
+        GameWindowData *curParent = GetWindowData(p->windowInteraction.parentIdx);
         if (curParent && curParent->minimizeAnimState != 0)
             return;
 
-        int newWin = WindowQuery_GetTopWindowAt(newBounds, p->parentIdx);
-        if (newWin >= 0 && newWin != p->parentIdx)
+        int newWin = WindowQuery_GetTopWindowAt(newBounds, p->windowInteraction.parentIdx);
+        if (newWin >= 0 && newWin != p->windowInteraction.parentIdx)
         {
-            p->parentIdx = newWin;
-            p->lastAppliedParentIdx = -1; /* 上と同じ理由: 親が切り替わったので基準を無効化 */
+            p->windowInteraction.parentIdx = newWin;
+            p->windowInteraction.lastAppliedParentIdx = -1; /* 上と同じ理由: 親が切り替わったので基準を無効化 */
         }
         else if (newWin < 0)
         {
-            p->parentIdx = -1;
-            p->lastAppliedParentIdx = -1;
+            p->windowInteraction.parentIdx = -1;
+            p->windowInteraction.lastAppliedParentIdx = -1;
         }
     }
 }
@@ -1323,27 +1354,27 @@ static int FloorContactY(const GameWindowData *w, RECT wb)
 
 static void CheckGroundedNormal(Player *p, float dt)
 {
-    if (p->vy < 0.0f)
+    if (p->physics.vy < 0.0f)
     {
-        p->grounded = 0;
+        p->physics.grounded = 0;
         return;
     }
 
-    int feetX = (int)p->x;
-    int feetY = (int)p->y + p->height - GROUND_SAMPLE_INSET;
-    int feetW = p->width;
+    int feetX = (int)p->physics.x;
+    int feetY = (int)p->physics.y + p->physics.height - GROUND_SAMPLE_INSET;
+    int feetW = p->physics.width;
 
-    float maxStep = fabsf(p->vy * dt);
+    float maxStep = fabsf(p->physics.vy * dt);
     if (maxStep < GROUND_SWEEP_MIN_STEP)
         maxStep = GROUND_SWEEP_MIN_STEP;
 
-    int sweepTop = (int)fminf((float)feetY, feetY + p->vy * dt) - 5;
+    int sweepTop = (int)fminf((float)feetY, feetY + p->physics.vy * dt) - 5;
     int sweepBottom = feetY + GROUND_CHECK_H + 10 + (int)maxStep;
     RECT sweep = {feetX, sweepTop, feetX + feetW, sweepBottom};
 
-    int playerLeft = (int)p->x;
-    int playerRight = (int)p->x + p->width;
-    int playerBottom = (int)p->y + p->height;
+    int playerLeft = (int)p->physics.x;
+    int playerRight = (int)p->physics.x + p->physics.width;
+    int playerBottom = (int)p->physics.y + p->physics.height;
 
     for (int i = 0; i < g_noEntryZoneCount; i++)
     {
@@ -1353,9 +1384,9 @@ static void CheckGroundedNormal(Player *p, float dt)
         if (playerBottom >= z.top && playerBottom <= z.top + GROUND_CONTACT_TOLERANCE &&
             playerRight > z.left && playerLeft < z.right)
         {
-            p->grounded = 1;
-            p->y = (float)(z.top - p->height);
-            p->vy = 0.0f;
+            p->physics.grounded = 1;
+            p->physics.y = (float)(z.top - p->physics.height);
+            p->physics.vy = 0.0f;
             return;
         }
     }
@@ -1392,9 +1423,9 @@ static void CheckGroundedNormal(Player *p, float dt)
             if (playerBottom >= visBand.top && playerBottom <= visBand.top + GROUND_CONTACT_TOLERANCE &&
                 playerRight > visBand.left && playerLeft < visBand.right)
             {
-                p->grounded = 1;
-                p->y = (float)(visBand.top - p->height);
-                p->vy = 0.0f;
+                p->physics.grounded = 1;
+                p->physics.y = (float)(visBand.top - p->physics.height);
+                p->physics.vy = 0.0f;
                 return;
             }
             break; /* CheckAnyCollisionはウィンドウごとに最初に見つかった可視の辺で停止する */
@@ -1412,9 +1443,9 @@ static void CheckGroundedNormal(Player *p, float dt)
         if (playerBottom >= wb.top && playerBottom <= wb.top + GROUND_CONTACT_TOLERANCE &&
             playerRight > wb.left && playerLeft < wb.right)
         {
-            p->grounded = 1;
-            p->y = (float)(wb.top - p->height);
-            p->vy = 0.0f;
+            p->physics.grounded = 1;
+            p->physics.y = (float)(wb.top - p->physics.height);
+            p->physics.vy = 0.0f;
             return;
         }
     }
@@ -1449,16 +1480,16 @@ static void CheckGroundedNormal(Player *p, float dt)
             if (IsDesktopIconOccluded(currentFeetBounds))
                 continue;
 
-            p->grounded = 1;
-            p->y = (float)(icon.top - p->height);
-            p->vy = 0.0f;
+            p->physics.grounded = 1;
+            p->physics.y = (float)(icon.top - p->physics.height);
+            p->physics.vy = 0.0f;
             return;
         }
     }
     int idxs[MAX_INTERSECTING];
     int n = GatherIntersectingWindows(sweep, idxs, MAX_INTERSECTING);
 
-    if (p->parentIdx < 0)
+    if (p->windowInteraction.parentIdx < 0)
     {
         /* 外側: NoEntryでない全てのウィンドウの上面（タイトルバーを含む）は、
            上から着地できる床になる -- parentWindow==nullの分岐と一致させる。
@@ -1492,9 +1523,9 @@ static void CheckGroundedNormal(Player *p, float dt)
             }
             if (isGroundValid)
             {
-                p->grounded = 1;
-                p->y = (float)(wb.top - p->height);
-                p->vy = 0.0f;
+                p->physics.grounded = 1;
+                p->physics.y = (float)(wb.top - p->physics.height);
+                p->physics.vy = 0.0f;
                 return;
             }
         }
@@ -1555,26 +1586,26 @@ static void CheckGroundedNormal(Player *p, float dt)
 
         if (bestBottom != INT_MAX)
         {
-            p->grounded = 1;
-            p->y = (float)(bestBottom - p->height);
-            p->vy = 0.0f;
+            p->physics.grounded = 1;
+            p->physics.y = (float)(bestBottom - p->physics.height);
+            p->physics.vy = 0.0f;
             return;
         }
     }
 
-    if (p->parentIdx < 0)
+    if (p->windowInteraction.parentIdx < 0)
     {
         int screenH = GetSystemMetrics(SM_CYSCREEN);
         if (playerBottom >= screenH)
         {
-            p->grounded = 1;
-            p->y = (float)(screenH - p->height);
-            p->vy = 0.0f;
+            p->physics.grounded = 1;
+            p->physics.y = (float)(screenH - p->physics.height);
+            p->physics.vy = 0.0f;
             return;
         }
     }
 
-    p->grounded = 0;
+    p->physics.grounded = 0;
 }
 
 /* ---- CheckGroundedInverted: CheckGroundedNormalの上下ミラー版。乗っている
@@ -1587,27 +1618,27 @@ static void CheckGroundedNormal(Player *p, float dt)
 
 static void CheckGroundedInverted(Player *p, float dt)
 {
-    if (p->vy > 0.0f)
+    if (p->physics.vy > 0.0f)
     {
-        p->grounded = 0;
+        p->physics.grounded = 0;
         return;
     }
 
-    int headX = (int)p->x;
-    int headY = (int)p->y + GROUND_SAMPLE_INSET;
-    int headW = p->width;
+    int headX = (int)p->physics.x;
+    int headY = (int)p->physics.y + GROUND_SAMPLE_INSET;
+    int headW = p->physics.width;
 
-    float maxStep = fabsf(p->vy * dt);
+    float maxStep = fabsf(p->physics.vy * dt);
     if (maxStep < GROUND_SWEEP_MIN_STEP)
         maxStep = GROUND_SWEEP_MIN_STEP;
 
-    int sweepBottom = (int)fmaxf((float)headY, headY + p->vy * dt) + 5;
+    int sweepBottom = (int)fmaxf((float)headY, headY + p->physics.vy * dt) + 5;
     int sweepTop = headY - GROUND_CHECK_H - 10 - (int)maxStep;
     RECT sweep = {headX, sweepTop, headX + headW, sweepBottom};
 
-    int playerLeft = (int)p->x;
-    int playerRight = (int)p->x + p->width;
-    int playerTop = (int)p->y;
+    int playerLeft = (int)p->physics.x;
+    int playerRight = (int)p->physics.x + p->physics.width;
+    int playerTop = (int)p->physics.y;
 
     for (int i = 0; i < g_noEntryZoneCount; i++)
     {
@@ -1623,9 +1654,9 @@ static void CheckGroundedInverted(Player *p, float dt)
         if (playerTop <= z.bottom + GROUND_CONTACT_TOLERANCE && playerTop >= z.bottom - GROUND_CONTACT_TOLERANCE &&
             playerRight > z.left && playerLeft < z.right)
         {
-            p->grounded = 1;
-            p->y = (float)z.bottom;
-            p->vy = 0.0f;
+            p->physics.grounded = 1;
+            p->physics.y = (float)z.bottom;
+            p->physics.vy = 0.0f;
             return;
         }
     }
@@ -1652,9 +1683,9 @@ static void CheckGroundedInverted(Player *p, float dt)
             if (playerTop <= visBand.bottom + GROUND_CONTACT_TOLERANCE && playerTop >= visBand.bottom - GROUND_CONTACT_TOLERANCE &&
                 playerRight > visBand.left && playerLeft < visBand.right)
             {
-                p->grounded = 1;
-                p->y = (float)visBand.bottom;
-                p->vy = 0.0f;
+                p->physics.grounded = 1;
+                p->physics.y = (float)visBand.bottom;
+                p->physics.vy = 0.0f;
                 return;
             }
             break;
@@ -1673,9 +1704,9 @@ static void CheckGroundedInverted(Player *p, float dt)
         if (playerTop <= wb.bottom + GROUND_CONTACT_TOLERANCE && playerTop >= wb.bottom - GROUND_CONTACT_TOLERANCE &&
             playerRight > wb.left && playerLeft < wb.right)
         {
-            p->grounded = 1;
-            p->y = (float)wb.bottom;
-            p->vy = 0.0f;
+            p->physics.grounded = 1;
+            p->physics.y = (float)wb.bottom;
+            p->physics.vy = 0.0f;
             return;
         }
     }
@@ -1703,9 +1734,9 @@ static void CheckGroundedInverted(Player *p, float dt)
             if (IsDesktopIconOccluded(currentHeadBounds))
                 continue;
 
-            p->grounded = 1;
-            p->y = (float)icon.bottom;
-            p->vy = 0.0f;
+            p->physics.grounded = 1;
+            p->physics.y = (float)icon.bottom;
+            p->physics.vy = 0.0f;
             return;
         }
     }
@@ -1713,7 +1744,7 @@ static void CheckGroundedInverted(Player *p, float dt)
     int idxs[MAX_INTERSECTING];
     int n = GatherIntersectingWindows(sweep, idxs, MAX_INTERSECTING);
 
-    if (p->parentIdx < 0)
+    if (p->windowInteraction.parentIdx < 0)
     {
         for (int k = 0; k < n; k++)
         {
@@ -1745,9 +1776,9 @@ static void CheckGroundedInverted(Player *p, float dt)
             }
             if (isGroundValid)
             {
-                p->grounded = 1;
-                p->y = (float)contactY;
-                p->vy = 0.0f;
+                p->physics.grounded = 1;
+                p->physics.y = (float)contactY;
+                p->physics.vy = 0.0f;
                 return;
             }
         }
@@ -1793,25 +1824,25 @@ static void CheckGroundedInverted(Player *p, float dt)
 
         if (bestTop != INT_MIN)
         {
-            p->grounded = 1;
-            p->y = (float)bestTop;
-            p->vy = 0.0f;
+            p->physics.grounded = 1;
+            p->physics.y = (float)bestTop;
+            p->physics.vy = 0.0f;
             return;
         }
     }
 
-    if (p->parentIdx < 0)
+    if (p->windowInteraction.parentIdx < 0)
     {
         if (playerTop <= 0)
         {
-            p->grounded = 1;
-            p->y = 0.0f;
-            p->vy = 0.0f;
+            p->physics.grounded = 1;
+            p->physics.y = 0.0f;
+            p->physics.vy = 0.0f;
             return;
         }
     }
 
-    p->grounded = 0;
+    p->physics.grounded = 0;
 }
 
 static void CheckGrounded(Player *p, float dt)
@@ -1827,9 +1858,9 @@ static void CheckGrounded(Player *p, float dt)
    との間の隙間。低い天井付近でのジャンプ伸縮を制限するために使う。 */
 static float DistanceToMovableBoundsTop(const Player *p)
 {
-    int playerLeft = (int)p->x;
-    int playerRight = (int)p->x + p->width;
-    int playerTop = (int)p->y;
+    int playerLeft = (int)p->physics.x;
+    int playerRight = (int)p->physics.x + p->physics.width;
+    int playerTop = (int)p->physics.y;
 
     int closestBottom = INT_MIN;
     for (int i = 0; i < g_windowCount; i++)
@@ -1874,7 +1905,7 @@ static int PlayerLerpInt(int a, int b, float t)
 
 void Player_StartMinimizeAnim(Player *p)
 {
-    if (p->isMinimized || p->minimizeAnimState != 0 || !p->hwnd)
+    if (p->windowInteraction.isMinimized || p->minimizeAnim.minimizeAnimState != 0 || !p->hwnd)
         return;
 
     /* 通常の物理演算/移動更新をここで即座に停止する（Player_Update先頭の
@@ -1885,7 +1916,7 @@ void Player_StartMinimizeAnim(Player *p)
        非表示化はまだ行わない -- それらはアニメーション完了時に呼ばれる
        Player_OnMinimizeが引き続き正しい親を記録できるよう、そのタイミング
        まで据え置く。 */
-    p->isMinimized = 1;
+    p->windowInteraction.isMinimized = 1;
 
     /* 縮小アニメーションで実際に小さくする前に、フルサイズの見た目を1回
        だけキャプチャしてDWMへ渡す準備をする（GameWindow.cの
@@ -1897,26 +1928,26 @@ void Player_StartMinimizeAnim(Player *p)
     DwmSetWindowAttribute(p->hwnd, DWMWA_FORCE_ICONIC_REPRESENTATION, &trueVal, sizeof(trueVal));
     DwmInvalidateIconicBitmaps(p->hwnd);
 
-    GetWindowRect(p->hwnd, &p->minimizeAnimFrom);
-    int cx = (p->minimizeAnimFrom.left + p->minimizeAnimFrom.right) / 2;
+    GetWindowRect(p->hwnd, &p->minimizeAnim.minimizeAnimFrom);
+    int cx = (p->minimizeAnim.minimizeAnimFrom.left + p->minimizeAnim.minimizeAnimFrom.right) / 2;
     int screenBottom = GetSystemMetrics(SM_CYSCREEN);
-    p->minimizeAnimTo = PlayerMinimizeAnimPointRect(cx, screenBottom);
-    p->minimizeAnimT = 0.0f;
-    p->minimizeAnimState = 1;
+    p->minimizeAnim.minimizeAnimTo = PlayerMinimizeAnimPointRect(cx, screenBottom);
+    p->minimizeAnim.minimizeAnimT = 0.0f;
+    p->minimizeAnim.minimizeAnimState = 1;
 }
 
 void Player_UpdateMinimizeAnim(Player *p, float dt)
 {
-    if (p->minimizeAnimState == 0 || !p->hwnd)
+    if (p->minimizeAnim.minimizeAnimState == 0 || !p->hwnd)
         return;
 
-    p->minimizeAnimT += dt / MINIMIZE_ANIM_DURATION;
-    float t = p->minimizeAnimT;
+    p->minimizeAnim.minimizeAnimT += dt / MINIMIZE_ANIM_DURATION;
+    float t = p->minimizeAnim.minimizeAnimT;
     if (t > 1.0f)
         t = 1.0f;
 
-    RECT from = p->minimizeAnimFrom;
-    RECT to = p->minimizeAnimTo;
+    RECT from = p->minimizeAnim.minimizeAnimFrom;
+    RECT to = p->minimizeAnim.minimizeAnimTo;
     int x = PlayerLerpInt(from.left, to.left, t);
     int y = PlayerLerpInt(from.top, to.top, t);
     int w = PlayerLerpInt(from.right - from.left, to.right - to.left, t);
@@ -1928,16 +1959,16 @@ void Player_UpdateMinimizeAnim(Player *p, float dt)
        ある（GameWindow.cのMinimizeAnim_UpdateAllと同じ理由）。 */
     UpdateWindow(p->hwnd);
 
-    if (p->minimizeAnimT >= 1.0f)
-        p->minimizeAnimState = 0;
+    if (p->minimizeAnim.minimizeAnimT >= 1.0f)
+        p->minimizeAnim.minimizeAnimState = 0;
 }
 
 void Player_OnMinimize(Player *p)
 {
-    p->isMinimized = 1;
-    p->lastValidParentIdx = p->parentIdx;
-    p->parentIdx = -1;
-    p->lastAppliedParentIdx = -1; /* HandleWindowTransitionsと同じ理由: 親が変わるので基準を無効化 */
+    p->windowInteraction.isMinimized = 1;
+    p->windowInteraction.lastValidParentIdx = p->windowInteraction.parentIdx;
+    p->windowInteraction.parentIdx = -1;
+    p->windowInteraction.lastAppliedParentIdx = -1; /* HandleWindowTransitionsと同じ理由: 親が変わるので基準を無効化 */
 
     /* PlayerForm.OnMinimizeはWindowState = FormWindowState.Minimizedを
        設定する -- 内部フラグだけではなく、実際のWin32の最小化（非表示になり
@@ -1978,9 +2009,9 @@ void Player_OnMinimize(Player *p)
 
 void Player_OnRestore(Player *p)
 {
-    p->isMinimized = 0;
-    p->minimizeAnimState = 0;
-    p->lastAppliedParentIdx = -1; /* HandleWindowTransitionsと同じ理由: 親が変わるので基準を無効化 */
+    p->windowInteraction.isMinimized = 0;
+    p->minimizeAnim.minimizeAnimState = 0;
+    p->windowInteraction.lastAppliedParentIdx = -1; /* HandleWindowTransitionsと同じ理由: 親が変わるので基準を無効化 */
 
     if (p->hwnd)
     {
@@ -1991,61 +2022,60 @@ void Player_OnRestore(Player *p)
         BOOL falseVal = FALSE;
         DwmSetWindowAttribute(p->hwnd, DWMWA_FORCE_ICONIC_REPRESENTATION, &falseVal, sizeof(falseVal));
     }
-    if (p->iconicBitmap)
+    if (p->minimizeAnim.iconicBitmap)
     {
-        DeleteObject(p->iconicBitmap);
-        p->iconicBitmap = NULL;
+        DeleteObject(p->minimizeAnim.iconicBitmap);
+        p->minimizeAnim.iconicBitmap = NULL;
     }
 
     RECT bounds;
     Player_GetBounds(p, &bounds);
 
-    if (p->lastValidParentIdx >= 0)
+    if (p->windowInteraction.lastValidParentIdx >= 0)
     {
-        GameWindowData *last = GetWindowData(p->lastValidParentIdx);
+        GameWindowData *last = GetWindowData(p->windowInteraction.lastValidParentIdx);
         if (last && last->hwnd && !last->minimized)
         {
             RECT lastBounds;
             GetWindowFullBounds(last->hwnd, &lastBounds);
             if (RectsOverlap(bounds, lastBounds))
             {
-                p->parentIdx = p->lastValidParentIdx;
+                p->windowInteraction.parentIdx = p->windowInteraction.lastValidParentIdx;
                 return;
             }
         }
     }
 
-    p->parentIdx = WindowQuery_GetTopWindowAt(bounds, -1);
+    p->windowInteraction.parentIdx = WindowQuery_GetTopWindowAt(bounds, -1);
 }
 
 void Player_Update(Player *p, float dt)
 {
-    if (p->isMinimized)
+    if (p->windowInteraction.isMinimized)
         return;
 
-    int wasGrounded = p->grounded;
+    int wasGrounded = p->physics.grounded;
     int gravDir = GravDir(p);
 
     /* PlayerInputHandler.UpdateFacingは左を先にチェックして即座にreturnするため、
        両方向が同時に押されている場合は左が優先される。 */
-    if (GetAsyncKeyState('A') & 0x8000 || GetAsyncKeyState(VK_LEFT) & 0x8000)
-        p->facingRight = 0;
-    else if (GetAsyncKeyState('D') & 0x8000 || GetAsyncKeyState(VK_RIGHT) & 0x8000)
-        p->facingRight = 1;
+    if (p->inputHandler.IsMovingLeft())
+        p->physics.facingRight = 0;
+    else if (p->inputHandler.IsMovingRight())
+        p->physics.facingRight = 1;
 
-    if (p->grounded &&
-        (GetAsyncKeyState(VK_SPACE) & 0x8000 || GetAsyncKeyState(VK_UP) & 0x8000 || GetAsyncKeyState('W') & 0x8000))
+    if (p->physics.grounded && p->inputHandler.ShouldJump())
     {
         /* ジャンプは常に接地面から離れる向き = 重力と逆方向。 */
-        p->vy = -JUMP_FORCE * gravDir;
-        p->grounded = 0;
+        p->physics.vy = -JUMP_FORCE * gravDir;
+        p->physics.grounded = 0;
         Anim_StartJump(&p->anim);
     }
 
     float moveX = 0.0f;
-    if (GetAsyncKeyState('A') & 0x8000 || GetAsyncKeyState(VK_LEFT) & 0x8000)
+    if (p->inputHandler.IsMovingLeft())
         moveX -= MOVE_SPEED * dt;
-    if (GetAsyncKeyState('D') & 0x8000 || GetAsyncKeyState(VK_RIGHT) & 0x8000)
+    if (p->inputHandler.IsMovingRight())
         moveX += MOVE_SPEED * dt;
     /* PlayerForm.UpdateAsyncは、この衝突前の生の値と同じもの（「移動前の
        水平速度を計算（アニメーション用）」）を計算し、UpdateAnimationStateに
@@ -2053,7 +2083,7 @@ void Player_Update(Player *p, float dt)
        実際の衝突後の移動が最終的に0にクランプされても、Runningアニメーションは
        再生され続ける。 */
     float rawDx = moveX;
-    float moveY = p->vy * dt;
+    float moveY = p->physics.vy * dt;
 
     RECT current;
     Player_GetBounds(p, &current);
@@ -2063,32 +2093,32 @@ void Player_Update(Player *p, float dt)
     CheckVerticalCollision(current, &moveY, &hitCeiling, gravDir);
     if (hitCeiling)
     {
-        p->vy = 0.0f;
+        p->physics.vy = 0.0f;
         Anim_ResetScale(&p->anim);
     }
 
     RECT proposed = current;
     OffsetR(&proposed, (int)moveX, (int)moveY);
 
-    if (!IsValidMove(proposed, p->parentIdx))
+    if (!IsValidMove(proposed, p->windowInteraction.parentIdx))
     {
         int ceil2 = 0;
-        proposed = AdjustMovement(current, proposed, p->parentIdx, &ceil2, gravDir);
+        proposed = AdjustMovement(current, proposed, p->windowInteraction.parentIdx, &ceil2, gravDir);
         if (ceil2)
         {
-            p->vy = 0.0f;
+            p->physics.vy = 0.0f;
             Anim_ResetScale(&p->anim);
         }
     }
 
-    if (p->parentIdx < 0)
+    if (p->windowInteraction.parentIdx < 0)
     {
         int ceil3 = 0;
         proposed = HandleWindowCollisions(proposed, current, &ceil3, gravDir);
         proposed = HandleDesktopIconCollisions(proposed, current, &ceil3, gravDir);
         if (ceil3)
         {
-            p->vy = 0.0f;
+            p->physics.vy = 0.0f;
             Anim_ResetScale(&p->anim);
         }
     }
@@ -2097,14 +2127,14 @@ void Player_Update(Player *p, float dt)
     proposed = HandleButtonCollisions(proposed, current, &ceil4, gravDir);
     if (ceil4)
     {
-        p->vy = 0.0f;
+        p->physics.vy = 0.0f;
         Anim_ResetScale(&p->anim);
     }
 
     HandleWindowTransitions(p, proposed);
 
-    p->x = (float)proposed.left;
-    p->y = (float)proposed.top;
+    p->physics.x = (float)proposed.left;
+    p->physics.y = (float)proposed.top;
 
     CheckGrounded(p, dt);
 
@@ -2118,13 +2148,13 @@ void Player_Update(Player *p, float dt)
        正確な線上を占めていない限り5点全てが現在の親を見逃してしまい、
        誤ってparentIdxを-1にクリアし、以後の全ての移動をフリーズさせて
        しまう。 */
-    if (!p->grounded)
-        p->vy += GRAVITY * dt * gravDir;
+    if (!p->physics.grounded)
+        p->physics.vy += GRAVITY * dt * gravDir;
     else
-        p->vy = 0.0f;
+        p->physics.vy = 0.0f;
 
-    Anim_UpdateState(&p->anim, p->grounded, wasGrounded, rawDx);
-    Anim_Update(&p->anim, DistanceToMovableBoundsTop(p), (float)p->height);
+    Anim_UpdateState(&p->anim, p->physics.grounded, wasGrounded, rawDx);
+    Anim_Update(&p->anim, DistanceToMovableBoundsTop(p), (float)p->physics.height);
 
     if (p->hwnd)
     {
