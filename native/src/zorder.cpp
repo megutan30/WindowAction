@@ -68,14 +68,17 @@ void ZOrder_BringToFront(HWND hwnd)
         if (g_orderCount < MAX_WINDOWS)
             g_order[g_orderCount++] = group[g];
 
-    /* 実際のOS Z-orderを内部リストに合わせて再同期する: 背面から前面へ順に走査し、
-       各ウィンドウに再適用することで最後の呼び出し（最前面）が優先されるようにする。
-       ここはHWND_TOPではなくHWND_TOPMOSTを使う -- ゲーム内の全ウィンドウは
-       CreateGameWindowIndexedで常にHWND_TOPMOSTとして生成される設計（デスクトップ上の
-       他アプリより常に手前に表示する）ため、再同期時も明示的にTOPMOSTを維持する方が
-       意図に忠実。 */
-    for (int i = 0; i < g_orderCount; i++)
-        SetWindowPos(g_order[i], HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    /* 実際のOS Z-orderは、移動したグループ自身だけをHWND_TOPMOSTへ送れば
+       十分に同期できる -- あるウィンドウを最前面へ移動すると、それ以外の
+       ウィンドウは明示的にSetWindowPosを呼ばなくてもOS側が自動的に相対順位を
+       調整するため。以前はg_order全件（テストモードのパレット/ツールバーの
+       ような無関係なウィンドウも含む）を毎回SetWindowPosし直しており、
+       クリックのたびに画面上の全ウィンドウが明滅する不具合があった
+       （実際に報告された不具合）。グループ内の相対順序は従来通りgroup[0]
+       （祖先側）から順にTOPMOSTへ送ることで、最後に送るgroup[groupCount-1]が
+       最終的に最前面になる。 */
+    for (int g = 0; g < groupCount; g++)
+        SetWindowPos(group[g], HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
 void ZOrder_ReassertOverlayFront(HWND playerHwnd)
