@@ -3,6 +3,9 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/main/VisualStudio.gitignore
 
+# native/ (C/Win32ネイティブ移植)のビルド出力
+native/build/
+
 # User-specific files
 *.rsuser
 *.suo
